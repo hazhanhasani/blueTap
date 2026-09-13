@@ -3,6 +3,9 @@ import { cors } from 'hono/cors';
 import { authenticateRequest } from './telegram';
 import { handleTelegramUpdate } from './bot';
 import {
+  autoMineLevel,
+  autoMineState,
+  autoMineUpgradeCost,
   DAILY_REWARD,
   effectiveEnergy,
   effectiveTapBucket,
@@ -62,6 +65,44 @@ async function currentUser(c: any): Promise<UserRow> {
   return user;
 }
 
+async function settleAutoMine(env: Env, user: UserRow, now = Date.now()) {
+  const state = autoMineState(user, now);
+  const expectedLastAt = Number(user.auto_mine_last_at || 0);
+  const expectedConfirmedAt = Number(user.auto_mine_confirmed_at || 0);
+
+  if (state.expired) {
+    const result = await env.DB.prepare(`
+      UPDATE users
+      SET auto_mine_burned = auto_mine_burned + ?, auto_mine_last_at = ?, auto_mine_confirmed_at = ?, updated_at = ?
+      WHERE id = ? AND auto_mine_last_at = ? AND auto_mine_confirmed_at = ?
+    `).bind(state.pending, now, now, now, user.id, expectedLastAt, expectedConfirmedAt).run();
+
+    if (result.meta.changes && state.pending > 0) {
+      await env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, 0, ?, ?, ?)')
+        .bind(user.id, 'auto_mine_burn', JSON.stringify({ burned: state.pending, missedDeadlineAt: state.deadlineAt }), now)
+        .run();
+    }
+
+    const fresh = (await getUserByTelegramId(env, user.telegram_id))!;
+    return { awarded: 0, burned: result.meta.changes ? state.pending : 0, user: fresh };
+  }
+
+  const result = await env.DB.prepare(`
+    UPDATE users
+    SET points = points + ?, total_earned = total_earned + ?, auto_mine_last_at = ?, auto_mine_confirmed_at = ?, updated_at = ?
+    WHERE id = ? AND auto_mine_last_at = ? AND auto_mine_confirmed_at = ?
+  `).bind(state.pending, state.pending, now, now, now, user.id, expectedLastAt, expectedConfirmedAt).run();
+
+  if (result.meta.changes && state.pending > 0) {
+    await env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)')
+      .bind(user.id, state.pending, 'auto_mine', JSON.stringify({ ratePerMinute: state.ratePerMinute, level: state.level }), now)
+      .run();
+  }
+
+  const fresh = (await getUserByTelegramId(env, user.telegram_id))!;
+  return { awarded: result.meta.changes ? state.pending : 0, burned: 0, user: fresh };
+}
+
 app.get('/api/bootstrap', async (c) => {
   const user = await currentUser(c);
   const [profile, tasks, leaders] = await Promise.all([
@@ -106,6 +147,47 @@ app.post('/api/tap', async (c) => {
 
   const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
   return c.json({ awarded, awardedTaps, tapValue, energySpent, profile: await profileView(c.env, fresh) });
+});
+
+app.post('/api/auto-mine/confirm', async (c) => {
+  const user = await currentUser(c);
+  const result = await settleAutoMine(c.env, user);
+  return c.json({
+    awarded: result.awarded,
+    burned: result.burned,
+    profile: await profileView(c.env, result.user),
+  });
+});
+
+app.post('/api/upgrades/auto-mine', async (c) => {
+  const user = await currentUser(c);
+  const now = Date.now();
+  const settled = await settleAutoMine(c.env, user, now);
+  const current = settled.user;
+  const level = autoMineLevel(current);
+  const cost = autoMineUpgradeCost(level);
+
+  if (cost === null) return c.json({ error: 'Maximum auto-mine level reached' }, 409);
+  if (current.points < cost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
+
+  const result = await c.env.DB.prepare(`
+    UPDATE users
+    SET points = points - ?, auto_mine_level = auto_mine_level + 1, auto_mine_last_at = ?, auto_mine_confirmed_at = ?, updated_at = ?
+    WHERE id = ? AND points >= ? AND auto_mine_level = ?
+  `).bind(cost, now, now, now, current.id, cost, level).run();
+
+  if (!result.meta.changes) return c.json({ error: 'ارتقای ماین خودکار انجام نشد؛ دوباره تلاش کن' }, 409);
+  await c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(current.id, -cost, 'upgrade_auto_mine', JSON.stringify({ from: level, to: level + 1 }), now)
+    .run();
+
+  const fresh = (await getUserByTelegramId(c.env, current.telegram_id))!;
+  return c.json({
+    cost,
+    settledAwarded: settled.awarded,
+    burned: settled.burned,
+    profile: await profileView(c.env, fresh),
+  });
 });
 
 app.post('/api/upgrades/tap-power', async (c) => {
