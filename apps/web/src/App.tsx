@@ -23,7 +23,12 @@ export default function App() {
   const flushing = useRef(false);
   const wallet = useTonWallet();
 
+  const telegramInitData = window.Telegram?.WebApp?.initData?.trim() || '';
+  const allowDevAccess = Boolean(import.meta.env.VITE_DEV_TELEGRAM_ID);
+  const telegramAccessAllowed = Boolean(telegramInitData) || allowDevAccess;
+
   const load = useCallback(async () => {
+    if (!telegramAccessAllowed) return;
     try {
       const response = await api<Bootstrap>('/api/bootstrap');
       setData(response);
@@ -33,7 +38,7 @@ export default function App() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'خطا در اتصال');
     }
-  }, []);
+  }, [telegramAccessAllowed]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -118,6 +123,18 @@ export default function App() {
     if (!profile?.nextLevelPoints) return 100;
     return Math.min(100, Math.round((profile.points / profile.nextLevelPoints) * 100));
   }, [profile]);
+
+  if (!telegramAccessAllowed) {
+    return (
+      <main className="shell">
+        <div className="loading-card">
+          <b>دسترسی فقط از طریق تلگرام</b>
+          <p className="error">BlueTap فقط از داخل Mini App رسمی تلگرام قابل استفاده است.</p>
+          <a className="primary" href="https://t.me/bluecoinxbot" target="_blank" rel="noreferrer">باز کردن @bluecoinxbot</a>
+        </div>
+      </main>
+    );
+  }
 
   if (!profile || !data) {
     return <main className="shell"><div className="loading-card"><div className="spinner" /><b>BlueTap در حال بارگذاری…</b>{error && <p className="error">{error}</p>}</div></main>;
