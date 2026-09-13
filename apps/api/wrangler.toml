@@ -12,5 +12,5 @@ BOT_USERNAME = "bluecoinxbot"
 [[d1_databases]]
 binding = "DB"
 database_name = "bluetap"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "fe5b6d30-7f97-404a-a846-7f2a9657715e"
 migrations_dir = "migrations"
