@@ -1,6 +1,5 @@
 import type { UserRow } from './types';
 
-export const ENERGY_REGEN_PER_SECOND = 1;
 export const TAP_BUCKET_CAPACITY = 20;
 export const TAP_BUCKET_REFILL_PER_SECOND = 8;
 export const MAX_TAPS_PER_REQUEST = 20;
@@ -13,11 +12,11 @@ export const TURBO_DURATION_SECONDS = 30;
 export const TURBO_BASE_COST = 5_000;
 
 export const LEVELS = [
-  { level: 1, name: 'Starter', min: 0 },
-  { level: 2, name: 'Explorer', min: 5_000 },
-  { level: 3, name: 'Wave', min: 25_000 },
-  { level: 4, name: 'Captain', min: 100_000 },
-  { level: 5, name: 'Legend', min: 500_000 },
+  { level: 1, name: 'Starter', min: 0, maxEnergy: 1_000, energyRegenPerSecond: 1 },
+  { level: 2, name: 'Explorer', min: 5_000, maxEnergy: 1_250, energyRegenPerSecond: 1 },
+  { level: 3, name: 'Wave', min: 25_000, maxEnergy: 1_600, energyRegenPerSecond: 2 },
+  { level: 4, name: 'Captain', min: 100_000, maxEnergy: 2_200, energyRegenPerSecond: 2 },
+  { level: 5, name: 'Legend', min: 500_000, maxEnergy: 3_000, energyRegenPerSecond: 3 },
 ];
 
 export const TASKS = [
@@ -34,7 +33,11 @@ export function getLevel(points: number) {
   return {
     level: current.level,
     name: current.name,
+    maxEnergy: current.maxEnergy,
+    energyRegenPerSecond: current.energyRegenPerSecond,
     nextLevelPoints: next?.min ?? null,
+    nextMaxEnergy: next?.maxEnergy ?? null,
+    nextEnergyRegenPerSecond: next?.energyRegenPerSecond ?? null,
   };
 }
 
@@ -61,10 +64,15 @@ export function tapRewardPerTap(user: UserRow, now = Date.now()) {
   return power * (isTurboActive(user, now) ? TURBO_MULTIPLIER : 1);
 }
 
+export function energyProgression(user: UserRow) {
+  return getLevel(Number(user.total_earned || 0));
+}
+
 export function effectiveEnergy(user: UserRow, now: number) {
+  const progression = energyProgression(user);
   const elapsed = Math.max(0, now - user.last_energy_at) / 1000;
-  const recovered = Math.floor(elapsed * ENERGY_REGEN_PER_SECOND);
-  return Math.min(user.max_energy, user.energy + recovered);
+  const recovered = Math.floor(elapsed * progression.energyRegenPerSecond);
+  return Math.min(progression.maxEnergy, Number(user.energy || 0) + recovered);
 }
 
 export function effectiveTapBucket(user: UserRow, now: number) {
