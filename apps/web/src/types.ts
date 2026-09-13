@@ -7,6 +7,9 @@ export interface Profile {
   taps: number;
   energy: number;
   maxEnergy: number;
+  energyRegenPerSecond: number;
+  nextMaxEnergy: number | null;
+  nextEnergyRegenPerSecond: number | null;
   referralCode: string;
   referrals: number;
   walletAddress: string | null;
