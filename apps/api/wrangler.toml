@@ -1,0 +1,16 @@
+name = "bluetap-api"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[vars]
+ALLOWED_ORIGIN = "*"
+ALLOW_DEV_AUTH = "false"
+AUTH_MAX_AGE_SECONDS = "86400"
+BLUEX_JETTON_MASTER = "EQCUcgi1T0zSOvRIIM4ucj83GI2xqTxrLhaAlwaH8tOw9oTJ"
+BOT_USERNAME = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bluetap"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"

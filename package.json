@@ -1,0 +1,15 @@
+{
+  "name": "bluetap",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev:web": "npm run dev -w @bluetap/web",
+    "dev:api": "npm run dev -w @bluetap/api",
+    "build": "npm run build -w @bluetap/web && npm run typecheck -w @bluetap/api",
+    "typecheck": "npm run typecheck -w @bluetap/web && npm run typecheck -w @bluetap/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
