@@ -135,6 +135,7 @@ export async function profileView(env: Env, user: UserRow) {
     firstName: normalized.first_name,
     username: normalized.username,
     points: normalized.points,
+    updatedAt: Number(normalized.updated_at || 0),
     totalEarned,
     taps: normalized.taps,
     energy: effectiveEnergy(normalized, now),

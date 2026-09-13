@@ -49,12 +49,26 @@ export default function App() {
   const allowDevAccess = Boolean(import.meta.env.VITE_DEV_TELEGRAM_ID);
   const telegramAccessAllowed = Boolean(telegramInitData) || allowDevAccess;
 
+  // Server responses can finish out of order while taps and auto-mine sync run together.
+  // Never let an older profile snapshot overwrite a newer one. While taps are still
+  // queued/in flight, also preserve the lower local energy value so energy cannot jump.
+  const applyServerProfile = useCallback((next: Profile) => {
+    setProfile((current) => {
+      if (!current) return next;
+      if (next.updatedAt < current.updatedAt) return current;
+      if (pendingTaps.current > 0 || flushing.current) {
+        return { ...next, energy: Math.min(current.energy, next.energy) };
+      }
+      return next;
+    });
+  }, []);
+
   const load = useCallback(async () => {
     if (!telegramAccessAllowed) return;
     try {
       const response = await api<Bootstrap>('/api/bootstrap');
       setData(response);
-      setProfile(response.profile);
+      applyServerProfile(response.profile);
       setTasks(response.tasks);
       setChallenges(response.challenges);
       setLeague(response.league);
@@ -99,7 +113,7 @@ export default function App() {
         comboMultiplier: number;
         profile: Profile;
       }>('/api/tap', { method: 'POST', body: JSON.stringify({ count }) });
-      setProfile(response.profile);
+      applyServerProfile(response.profile);
       if (response.luckyHits > 0) setFlash(`🍀 Lucky Tap ×${nf.format(response.highestLuckyMultiplier)} · +${nf.format(response.luckyBonus)} BP`);
       else if (response.comboMultiplier > 1) setFlash(`🔥 Combo ×${nf.format(response.comboMultiplier)} · ${nf.format(response.comboCount)} ضربه`);
     } catch (e) {
@@ -117,7 +131,7 @@ export default function App() {
     flushTimer.current = window.setTimeout(() => {
       flushTimer.current = null;
       void flush();
-    }, 450);
+    }, 180);
   }, [flush]);
 
   const turboActive = Boolean(profile && profile.turboUntil > clock);
@@ -157,7 +171,7 @@ export default function App() {
     addFloatingTap(event.clientX - rect.left, event.clientY - rect.top, tapReward);
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(turboActive ? 'medium' : 'light');
     pendingTaps.current += 1;
-    setProfile((p) => p ? { ...p, points: p.points + tapReward, totalEarned: p.totalEarned + tapReward, taps: p.taps + 1, energy: Math.max(0, p.energy - tapReward) } : p);
+    setProfile((p) => p ? { ...p, energy: Math.max(0, p.energy - tapReward) } : p);
     scheduleFlush();
   };
 
@@ -174,7 +188,7 @@ export default function App() {
     if (manual) setBusy(true);
     try {
       const result = await api<{ awarded: number; burned: number; shieldUsed: boolean; profile: Profile }>('/api/auto-mine/confirm', { method: 'POST', body: JSON.stringify({ manual }) });
-      setProfile(result.profile);
+      applyServerProfile(result.profile);
       setAutoMineSessionConfirmed(true);
       setClock(Date.now());
       if (result.shieldUsed) setFlash(`🛡️ Mining Shield استفاده شد و ${nf.format(result.awarded)} BP نجات پیدا کرد`);
@@ -210,7 +224,7 @@ export default function App() {
   useEffect(() => {
     if (!wallet?.account.address || !profile || profile.walletAddress === wallet.account.address) return;
     api<{ profile: Profile }>('/api/wallet', { method: 'POST', body: JSON.stringify({ address: wallet.account.address }) })
-      .then((r) => setProfile(r.profile))
+      .then((r) => applyServerProfile(r.profile))
       .catch((e) => setError(e instanceof Error ? e.message : 'خطای اتصال کیف پول'));
   }, [wallet?.account.address, profile?.walletAddress]);
 
@@ -220,7 +234,7 @@ export default function App() {
     try {
       await flush();
       const result = await api<any>(path, { method: 'POST' });
-      if (result.profile) setProfile(result.profile);
+      if (result.profile) applyServerProfile(result.profile);
       after?.(result);
       window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
     } catch (e) {
@@ -247,7 +261,7 @@ export default function App() {
     setBusy(true);
     try {
       const result = await api<{ profile: Profile; tasks: Task[] }>(`/api/tasks/${taskId}/claim`, { method: 'POST' });
-      setProfile(result.profile);
+      applyServerProfile(result.profile);
       setTasks(result.tasks);
     } catch (e) { setError(e instanceof Error ? e.message : 'خطا'); }
     finally { setBusy(false); }
@@ -258,7 +272,7 @@ export default function App() {
     setBusy(true);
     try {
       const result = await api<{ profile: Profile; challenges: Challenge[]; reward: number }>(`/api/challenges/${challengeId}/claim`, { method: 'POST' });
-      setProfile(result.profile);
+      applyServerProfile(result.profile);
       setChallenges(result.challenges);
       setFlash(`✅ +${nf.format(result.reward)} BP مأموریت`);
     } catch (e) { setError(e instanceof Error ? e.message : 'خطا'); }
@@ -270,7 +284,7 @@ export default function App() {
     setBusy(true);
     try {
       const result = await api<{ profile: Profile; league: LeagueState; reward: number }>('/api/league/claim', { method: 'POST' });
-      setProfile(result.profile);
+      applyServerProfile(result.profile);
       setLeague(result.league);
       setFlash(`🏆 +${nf.format(result.reward)} BP جایزه لیگ`);
     } catch (e) { setError(e instanceof Error ? e.message : 'خطا'); }

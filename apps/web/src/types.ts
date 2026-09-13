@@ -3,6 +3,7 @@ export interface Profile {
   firstName: string;
   username: string | null;
   points: number;
+  updatedAt: number;
   totalEarned: number;
   taps: number;
   energy: number;
