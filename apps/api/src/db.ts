@@ -96,7 +96,6 @@ export async function profileView(env: Env, user: UserRow) {
     totalEarned,
     taps: user.taps,
     energy: effectiveEnergy(user, now),
-    maxEnergy: user.max_energy,
     referralCode: user.referral_code,
     referrals: refs,
     walletAddress: user.wallet_address,
