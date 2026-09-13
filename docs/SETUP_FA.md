@@ -1,10 +1,15 @@
 # راه‌اندازی BlueTap
 
-## ۱. ساخت Bot
+## ۱. Bot تلگرام
 
-در `@BotFather` یک ربات بساز. Bot Token را فقط به‌عنوان Secret در Cloudflare ذخیره کن و هرگز داخل GitHub یا Frontend قرار نده.
+ربات پروژه ساخته شده است:
 
-بعد از Deploy شدن Mini App، از BotFather برای ربات یک Menu Button / Mini App URL تنظیم کن.
+- Username: `@bluecoinxbot`
+- Link: `https://t.me/bluecoinxbot`
+
+Bot Token را فقط به‌عنوان Secret در Cloudflare ذخیره کن و هرگز داخل GitHub یا Frontend قرار نده.
+
+بعد از Deploy شدن Mini App، از BotFather برای همین ربات یک Menu Button / Mini App URL تنظیم می‌کنیم.
 
 ## ۲. D1
 
@@ -27,7 +32,7 @@ npm run db:migrate:remote
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 ```
 
-در `wrangler.toml` مقدار `BOT_USERNAME` را بدون @ وارد کن. در Production مقدار `ALLOW_DEV_AUTH` باید `false` بماند.
+`BOT_USERNAME` در `wrangler.toml` روی `bluecoinxbot` تنظیم شده است. در Production مقدار `ALLOW_DEV_AUTH` باید `false` بماند.
 
 سپس:
 
