@@ -31,6 +31,10 @@ export interface UserRow {
   tap_bucket_at: number;
   tap_power_level: number;
   turbo_until: number;
+  auto_mine_level: number;
+  auto_mine_last_at: number;
+  auto_mine_confirmed_at: number;
+  auto_mine_burned: number;
   referral_code: string;
   referred_by: number | null;
   wallet_address: string | null;
