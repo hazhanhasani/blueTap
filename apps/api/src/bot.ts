@@ -25,21 +25,36 @@ async function telegramApi(env: Env, method: string, body: unknown): Promise<voi
   }
 }
 
+function referralFromStart(text: string): string | null {
+  const match = text.match(/^\/start(?:@\w+)?(?:\s+ref_([a-z0-9]+))?$/i);
+  const code = match?.[1]?.trim() || '';
+  return /^bt[a-z0-9]+$/i.test(code) ? code : null;
+}
+
+function webAppUrl(appUrl: string, referralCode: string | null): string {
+  const url = new URL(appUrl);
+  if (referralCode) url.searchParams.set('ref', referralCode);
+  return url.toString();
+}
+
 export async function handleTelegramUpdate(update: TelegramUpdate, env: Env, appUrl: string): Promise<void> {
   const message = update.message;
   const chatId = message?.chat?.id;
   if (!chatId) return;
 
-  const firstName = message?.from?.first_name?.trim() || 'Player';
+  const firstName = message?.from?.first_name?.trim() || 'بازیکن';
   const text = message?.text?.trim() || '';
 
   if (text.startsWith('/start')) {
+    const referralCode = referralFromStart(text);
     await telegramApi(env, 'sendMessage', {
       chat_id: chatId,
-      text: `Welcome ${firstName}!\n\nBlueTap is the official BlueCoin (BLUEX) game. Tap, complete missions, invite friends and earn Blue Points for Season 1.`,
+      text: referralCode
+        ? `${firstName}، دعوتت ثبت شد. وارد BlueTap شو و بازی را شروع کن.`
+        : `${firstName}، به BlueTap خوش آمدی.`,
       reply_markup: {
         inline_keyboard: [[
-          { text: '🚀 Open BlueTap', web_app: { url: appUrl } },
+          { text: '🚀 ورود به BlueTap', web_app: { url: webAppUrl(appUrl, referralCode) } },
         ]],
       },
     });
@@ -48,10 +63,10 @@ export async function handleTelegramUpdate(update: TelegramUpdate, env: Env, app
 
   await telegramApi(env, 'sendMessage', {
     chat_id: chatId,
-    text: 'Open BlueTap to play and collect Blue Points.',
+    text: 'برای بازی وارد BlueTap شو.',
     reply_markup: {
       inline_keyboard: [[
-        { text: '🚀 Open BlueTap', web_app: { url: appUrl } },
+        { text: '🚀 ورود به BlueTap', web_app: { url: webAppUrl(appUrl, null) } },
       ]],
     },
   });
