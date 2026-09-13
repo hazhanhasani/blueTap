@@ -1,0 +1,101 @@
+# one-time self-removing hotfix
+name: BlueTap Profile Sync Hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/profile-sync-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Patch profile synchronization race
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f'Missing patch target: {label} in {path}')
+              p.write_text(text.replace(old, new, 1))
+
+          # Expose a server-side freshness marker on every profile.
+          replace_once(
+              'apps/api/src/db.ts',
+              "    points: normalized.points,\n    totalEarned,",
+              "    points: normalized.points,\n    updatedAt: Number(normalized.updated_at || 0),\n    totalEarned,",
+              'profile updatedAt',
+          )
+
+          replace_once(
+              'apps/web/src/types.ts',
+              "  points: number;\n  totalEarned: number;",
+              "  points: number;\n  updatedAt: number;\n  totalEarned: number;",
+              'Profile.updatedAt',
+          )
+
+          app = Path('apps/web/src/App.tsx')
+          text = app.read_text()
+
+          anchor = "  const telegramAccessAllowed = Boolean(telegramInitData) || allowDevAccess;\n\n  const load = useCallback(async () => {"
+          helper = "  const telegramAccessAllowed = Boolean(telegramInitData) || allowDevAccess;\n\n  // Server responses can finish out of order while taps and auto-mine sync run together.\n  // Never let an older profile snapshot overwrite a newer one. While taps are still\n  // queued/in flight, also preserve the lower local energy value so energy cannot jump.\n  const applyServerProfile = useCallback((next: Profile) => {\n    setProfile((current) => {\n      if (!current) return next;\n      if (next.updatedAt < current.updatedAt) return current;\n      if (pendingTaps.current > 0 || flushing.current) {\n        return { ...next, energy: Math.min(current.energy, next.energy) };\n      }\n      return next;\n    });\n  }, []);\n\n  const load = useCallback(async () => {"
+          if anchor not in text:
+              raise SystemExit('Missing App applyServerProfile insertion target')
+          text = text.replace(anchor, helper, 1)
+
+          # All full profiles coming from the API go through the freshness guard.
+          text = re.sub(r'\bsetProfile\((response|result|r)\.profile\)', r'applyServerProfile(\1.profile)', text)
+
+          # Do not put unacknowledged tap points directly into the authoritative profile.
+          # The +N animation remains immediate; the balance is updated as soon as the
+          # short tap batch is acknowledged by the Worker. This removes the rollback flash.
+          old_tap = "    setProfile((p) => p ? { ...p, points: p.points + tapReward, totalEarned: p.totalEarned + tapReward, taps: p.taps + 1, energy: Math.max(0, p.energy - tapReward) } : p);"
+          new_tap = "    setProfile((p) => p ? { ...p, energy: Math.max(0, p.energy - tapReward) } : p);"
+          if old_tap not in text:
+              raise SystemExit('Missing optimistic tap profile target')
+          text = text.replace(old_tap, new_tap, 1)
+
+          # Make the authoritative score update feel effectively instant without flooding API calls.
+          text = text.replace("    }, 450);", "    }, 180);", 1)
+
+          app.write_text(text)
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Commit hotfix and remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/profile-sync-hotfix.yml
+          git add apps/api/src/db.ts apps/web/src/types.ts apps/web/src/App.tsx
+          git commit -m "Fix mining score synchronization flicker"
+          git push origin HEAD:main
+
+      - name: Deploy production Worker
+        run: npx wrangler deploy --config apps/api/wrangler.toml
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
