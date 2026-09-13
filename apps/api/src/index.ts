@@ -48,7 +48,7 @@ app.get('/api/bootstrap', async (c) => {
 
 app.post('/api/tap', async (c) => {
   const user = await currentUser(c);
-  const body = await c.req.json<{ count?: number }>().catch(() => ({}));
+  const body: { count?: number } = await c.req.json<{ count?: number }>().catch(() => ({ count: 1 }));
   const requested = Math.min(MAX_TAPS_PER_REQUEST, Math.max(1, Math.floor(Number(body.count || 1))));
   const now = Date.now();
   const energy = effectiveEnergy(user, now);
@@ -85,7 +85,7 @@ app.post('/api/daily', async (c) => {
 
 app.post('/api/wallet', async (c) => {
   const user = await currentUser(c);
-  const body = await c.req.json<{ address?: string }>().catch(() => ({}));
+  const body: { address?: string } = await c.req.json<{ address?: string }>().catch(() => ({ address: '' }));
   const address = String(body.address || '').trim();
   const userFriendly = /^[A-Za-z0-9_-]{48}$/.test(address);
   const raw = /^-?\d+:[0-9a-fA-F]{64}$/.test(address);
