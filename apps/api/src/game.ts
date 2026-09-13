@@ -11,6 +11,11 @@ export const TURBO_MULTIPLIER = 3;
 export const TURBO_DURATION_SECONDS = 30;
 export const TURBO_BASE_COST = 5_000;
 
+export const MAX_AUTO_MINE_LEVEL = 10;
+export const AUTO_MINE_BASE_RATE_PER_MINUTE = 6;
+export const AUTO_MINE_BASE_COST = 5_000;
+export const AUTO_MINE_CONFIRM_WINDOW_SECONDS = 5 * 60 * 60;
+
 export const LEVELS = [
   { level: 1, name: 'Starter', min: 0, maxEnergy: 1_000, energyRegenPerSecond: 1 },
   { level: 2, name: 'Explorer', min: 5_000, maxEnergy: 1_250, energyRegenPerSecond: 1 },
@@ -62,6 +67,49 @@ export function isTurboActive(user: UserRow, now = Date.now()) {
 export function tapRewardPerTap(user: UserRow, now = Date.now()) {
   const power = tapPowerLevel(user);
   return power * (isTurboActive(user, now) ? TURBO_MULTIPLIER : 1);
+}
+
+export function autoMineLevel(user: UserRow) {
+  return Math.min(MAX_AUTO_MINE_LEVEL, Math.max(1, Number(user.auto_mine_level || 1)));
+}
+
+export function autoMineRatePerMinute(userOrLevel: UserRow | number) {
+  const level = typeof userOrLevel === 'number'
+    ? Math.min(MAX_AUTO_MINE_LEVEL, Math.max(1, Math.floor(userOrLevel || 1)))
+    : autoMineLevel(userOrLevel);
+  return level * AUTO_MINE_BASE_RATE_PER_MINUTE;
+}
+
+export function autoMineUpgradeCost(currentLevel: number) {
+  const level = Math.min(MAX_AUTO_MINE_LEVEL, Math.max(1, Math.floor(currentLevel || 1)));
+  if (level >= MAX_AUTO_MINE_LEVEL) return null;
+  return AUTO_MINE_BASE_COST * level * level;
+}
+
+export function autoMineState(user: UserRow, now = Date.now()) {
+  const level = autoMineLevel(user);
+  const ratePerMinute = autoMineRatePerMinute(level);
+  const fallback = Number(user.updated_at || user.created_at || now);
+  const lastAt = Number(user.auto_mine_last_at || fallback);
+  const confirmedAt = Number(user.auto_mine_confirmed_at || fallback);
+  const deadlineAt = confirmedAt + AUTO_MINE_CONFIRM_WINDOW_SECONDS * 1000;
+  const accrualEnd = Math.min(now, deadlineAt);
+  const accrualStart = Math.min(lastAt, accrualEnd);
+  const elapsedMs = Math.max(0, accrualEnd - accrualStart);
+  const pending = Math.floor((elapsedMs * ratePerMinute) / 60_000);
+  const expired = now >= deadlineAt;
+
+  return {
+    level,
+    ratePerMinute,
+    lastAt,
+    confirmedAt,
+    deadlineAt,
+    pending,
+    expired,
+    remainingSeconds: expired ? 0 : Math.max(0, Math.ceil((deadlineAt - now) / 1000)),
+    burnedTotal: Number(user.auto_mine_burned || 0),
+  };
 }
 
 export function energyProgression(user: UserRow) {
