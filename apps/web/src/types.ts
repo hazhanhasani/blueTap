@@ -27,6 +27,18 @@ export interface Profile {
   turboUntil: number;
   turboRemainingSeconds: number;
   turboCost: number;
+  autoMineLevel: number;
+  autoMineRatePerMinute: number;
+  autoMineUpgradeCost: number | null;
+  maxAutoMineLevel: number;
+  autoMineLastAt: number;
+  autoMineConfirmedAt: number;
+  autoMineDeadlineAt: number;
+  autoMinePending: number;
+  autoMineExpired: boolean;
+  autoMineRemainingSeconds: number;
+  autoMineConfirmWindowSeconds: number;
+  autoMineBurnedTotal: number;
 }
 
 export interface Task {
