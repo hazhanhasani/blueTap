@@ -63,7 +63,7 @@ export default function App() {
     const count = Math.min(20, pendingTaps.current);
     pendingTaps.current -= count;
     try {
-      const response = await api<{ awarded: number; awardedTaps: number; tapValue: number; profile: Profile }>('/api/tap', {
+      const response = await api<{ awarded: number; awardedTaps: number; tapValue: number; energySpent: number; profile: Profile }>('/api/tap', {
         method: 'POST',
         body: JSON.stringify({ count }),
       });
@@ -100,9 +100,9 @@ export default function App() {
 
   const tap = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
-    if (!profile || energyRef.current <= 0) return;
+    if (!profile || energyRef.current < tapReward) return;
 
-    energyRef.current -= 1;
+    energyRef.current -= tapReward;
     const rect = event.currentTarget.getBoundingClientRect();
     addFloatingTap(event.clientX - rect.left, event.clientY - rect.top, tapReward);
 
@@ -113,7 +113,7 @@ export default function App() {
       points: p.points + tapReward,
       totalEarned: p.totalEarned + tapReward,
       taps: p.taps + 1,
-      energy: Math.max(0, p.energy - 1),
+      energy: Math.max(0, p.energy - tapReward),
     } : p);
     scheduleFlush();
   };
@@ -245,7 +245,7 @@ export default function App() {
               ))}
             </div>
           </div>
-          <p className="tap-hint">هر لمس +{nf.format(tapReward)} امتیاز · چندلمسی فعال</p>
+          <p className="tap-hint">هر لمس +{nf.format(tapReward)} امتیاز · -{nf.format(tapReward)} انرژی · چندلمسی فعال</p>
 
           <div className="energy-card">
             <div><span>⚡ انرژی</span><b>{nf.format(profile.energy)} / {nf.format(profile.maxEnergy)}</b></div>
@@ -278,7 +278,7 @@ export default function App() {
             <div className="upgrade-copy">
               <b>قدرت هر کلیک</b>
               <strong>+{nf.format(profile.tapPower)} <small>برای هر لمس</small></strong>
-              <p>ارتقای دائمی؛ هر سطح یک امتیاز بیشتر به هر کلیک اضافه می‌کند.</p>
+              <p>ارتقای دائمی؛ هر سطح یک امتیاز بیشتر به هر کلیک اضافه می‌کند و به همان میزان انرژی مصرف می‌شود.</p>
             </div>
             {profile.tapPowerUpgradeCost === null ? (
               <button disabled>بیشترین سطح</button>
@@ -294,7 +294,7 @@ export default function App() {
             <div className="upgrade-copy">
               <b>حالت توربو ×{profile.turboMultiplier}</b>
               <strong>{turboActive ? `${nf.format(turboRemainingSeconds)} ثانیه باقی‌مانده` : `${nf.format(profile.turboDurationSeconds)} ثانیه قدرت بیشتر`}</strong>
-              <p>در زمان توربو، قدرت فعلی کلیک در ×{profile.turboMultiplier} ضرب می‌شود.</p>
+              <p>در زمان توربو، قدرت فعلی کلیک در ×{profile.turboMultiplier} ضرب می‌شود و مصرف انرژی هم برابر امتیاز هر لمس خواهد بود.</p>
             </div>
             <button disabled={busy || turboActive || profile.points < profile.turboCost} onClick={activateTurbo}>
               {turboActive ? 'توربو فعال است' : `فعال‌سازی · ${nf.format(profile.turboCost)} BP`}
