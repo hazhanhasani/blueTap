@@ -22,12 +22,15 @@ export interface UserRow {
   username: string | null;
   first_name: string;
   points: number;
+  total_earned: number;
   taps: number;
   energy: number;
   max_energy: number;
   last_energy_at: number;
   tap_bucket: number;
   tap_bucket_at: number;
+  tap_power_level: number;
+  turbo_until: number;
   referral_code: string;
   referred_by: number | null;
   wallet_address: string | null;
