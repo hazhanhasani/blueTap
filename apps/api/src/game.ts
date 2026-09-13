@@ -6,6 +6,12 @@ export const TAP_BUCKET_REFILL_PER_SECOND = 8;
 export const MAX_TAPS_PER_REQUEST = 20;
 export const DAILY_REWARD = 500;
 
+export const MAX_TAP_POWER = 10;
+export const TAP_POWER_BASE_COST = 2_500;
+export const TURBO_MULTIPLIER = 3;
+export const TURBO_DURATION_SECONDS = 30;
+export const TURBO_BASE_COST = 5_000;
+
 export const LEVELS = [
   { level: 1, name: 'Starter', min: 0 },
   { level: 2, name: 'Explorer', min: 5_000 },
@@ -30,6 +36,29 @@ export function getLevel(points: number) {
     name: current.name,
     nextLevelPoints: next?.min ?? null,
   };
+}
+
+export function tapPowerLevel(user: UserRow) {
+  return Math.min(MAX_TAP_POWER, Math.max(1, Number(user.tap_power_level || 1)));
+}
+
+export function tapPowerUpgradeCost(currentLevel: number) {
+  const level = Math.min(MAX_TAP_POWER, Math.max(1, Math.floor(currentLevel || 1)));
+  if (level >= MAX_TAP_POWER) return null;
+  return TAP_POWER_BASE_COST * level * level;
+}
+
+export function turboCost(user: UserRow) {
+  return TURBO_BASE_COST + (tapPowerLevel(user) - 1) * 1_500;
+}
+
+export function isTurboActive(user: UserRow, now = Date.now()) {
+  return Number(user.turbo_until || 0) > now;
+}
+
+export function tapRewardPerTap(user: UserRow, now = Date.now()) {
+  const power = tapPowerLevel(user);
+  return power * (isTurboActive(user, now) ? TURBO_MULTIPLIER : 1);
 }
 
 export function effectiveEnergy(user: UserRow, now: number) {
