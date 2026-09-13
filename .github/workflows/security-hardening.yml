@@ -32,7 +32,7 @@ jobs:
       - name: Apply production hardening
         run: python3 scripts/security_hardening.py
 
-      - name: Cache-bust committed production smoke test
+      - name: Cache-bust generated CI smoke test
         shell: bash
         run: |
           python3 - <<'PY'
@@ -92,14 +92,16 @@ jobs:
           console.log('Production smoke test passed');
           NODE
 
-      - name: Commit hardened source and remove one-time tooling
+      - name: Commit hardened source
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          rm -f .github/workflows/security-hardening.yml scripts/security_hardening.py
-          git add -A
+          git restore .github/workflows/ci.yml
+          rm -f scripts/security_hardening.py
+          git add apps/api apps/web docs package.json package-lock.json .gitignore tests
+          git add -u scripts/security_hardening.py
           git diff --cached --check
           git commit -m 'Harden BlueTap production security and reliability'
           git push origin HEAD:main
