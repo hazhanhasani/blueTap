@@ -19,10 +19,10 @@ export const SKINS = [
 
 export const CHALLENGES = [
   { id: 'daily_taps_200', title: 'امروز ۲۰۰ بار ضربه بزن', period: 'daily', metric: 'daily_taps', target: 200, reward: 1_000 },
-  { id: 'daily_auto_2', title: 'امروز ۲ بار ماین خودکار را دستی تأیید کن', period: 'daily', metric: 'daily_auto_confirms', target: 2, reward: 1_500 },
+  { id: 'daily_taps_600', title: 'امروز ۶۰۰ بار ضربه بزن', period: 'daily', metric: 'daily_taps', target: 600, reward: 1_500 },
   { id: 'daily_turbo_1', title: 'امروز یک بار توربو را فعال کن', period: 'daily', metric: 'daily_turbo_uses', target: 1, reward: 1_200 },
   { id: 'weekly_taps_3000', title: 'این هفته ۳٬۰۰۰ بار ضربه بزن', period: 'weekly', metric: 'weekly_taps', target: 3_000, reward: 10_000 },
-  { id: 'weekly_auto_10', title: 'این هفته ۱۰ بار ماین خودکار را دستی تأیید کن', period: 'weekly', metric: 'weekly_auto_confirms', target: 10, reward: 8_000 },
+  { id: 'weekly_taps_6000', title: 'این هفته ۶٬۰۰۰ بار ضربه بزن', period: 'weekly', metric: 'weekly_taps', target: 6_000, reward: 8_000 },
   { id: 'weekly_turbo_5', title: 'این هفته ۵ بار توربو را فعال کن', period: 'weekly', metric: 'weekly_turbo_uses', target: 5, reward: 10_000 },
 ] as const;
 

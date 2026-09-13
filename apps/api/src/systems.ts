@@ -11,6 +11,10 @@ import {
 } from './features';
 import type { Env, UserRow } from './types';
 
+function publicPlayerId(id: number) {
+  return `p${Math.max(0, Math.floor(id)).toString(36)}`;
+}
+
 export async function normalizeActivityCounters(env: Env, user: UserRow, now = Date.now()) {
   const day = utcDayKey(now);
   const week = utcWeekKey(now);
@@ -171,31 +175,39 @@ export async function maybeDrawJackpot(env: Env, now = Date.now()) {
   const pool = Number((await stateValue(env, 'jackpot_pool')) || 0);
   if (pool <= 0) return null;
   const activeSince = now - JACKPOT_INTERVAL_MS;
-  const active = await env.DB.prepare('SELECT id, telegram_id, first_name, username FROM users WHERE updated_at >= ? ORDER BY id ASC LIMIT 1000')
-    .bind(activeSince).all<{ id: number; telegram_id: string; first_name: string; username: string | null }>();
-  const players = active.results || [];
-  if (!players.length) return null;
-  const winner = players[randomIndex(players.length)];
+  const countRow = await env.DB.prepare('SELECT COUNT(*) AS count FROM users WHERE updated_at >= ?')
+    .bind(activeSince).first<{ count: number }>();
+  const activeCount = Number(countRow?.count || 0);
+  if (activeCount <= 0) return null;
+  const offset = randomIndex(activeCount);
+  const winner = await env.DB.prepare('SELECT id, first_name, username FROM users WHERE updated_at >= ? ORDER BY id ASC LIMIT 1 OFFSET ?')
+    .bind(activeSince, offset).first<{ id: number; first_name: string; username: string | null }>();
+  if (!winner) return null;
   await env.DB.batch([
     env.DB.prepare("UPDATE game_state SET value = '0' WHERE key = 'jackpot_pool'"),
     env.DB.prepare(`
       INSERT INTO game_state (key, value) VALUES ('jackpot_last_winner', ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).bind(JSON.stringify({ telegramId: winner.telegram_id, name: winner.username ? `@${winner.username}` : winner.first_name, amount: pool, at: now })),
+    `).bind(JSON.stringify({ name: winner.username ? `@${winner.username}` : winner.first_name, amount: pool, at: now })),
     env.DB.prepare('UPDATE users SET points = points + ?, total_earned = total_earned + ?, updated_at = ? WHERE id = ?')
       .bind(pool, pool, now, winner.id),
     env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)')
       .bind(winner.id, pool, 'jackpot_win', JSON.stringify({ cycle }), now),
   ]);
-  return { winner, amount: pool };
+  return { winner: { public_id: publicPlayerId(winner.id), name: winner.username ? `@${winner.username}` : winner.first_name }, amount: pool };
 }
 
 export async function jackpotView(env: Env, now = Date.now()) {
   const pool = Number((await stateValue(env, 'jackpot_pool')) || 0);
   const lastRaw = await stateValue(env, 'jackpot_last_winner');
-  let lastWinner: { telegramId: string; name: string; amount: number; at: number } | null = null;
+  let lastWinner: { name: string; amount: number; at: number } | null = null;
   if (lastRaw) {
-    try { lastWinner = JSON.parse(lastRaw); } catch { lastWinner = null; }
+    try {
+      const parsed = JSON.parse(lastRaw) as { name?: unknown; amount?: unknown; at?: unknown };
+      if (typeof parsed.name === 'string') {
+        lastWinner = { name: parsed.name, amount: Number(parsed.amount || 0), at: Number(parsed.at || 0) };
+      }
+    } catch { lastWinner = null; }
   }
   const cycle = Math.floor(now / JACKPOT_INTERVAL_MS);
   return { pool, nextDrawAt: (cycle + 1) * JACKPOT_INTERVAL_MS, lastWinner, contributionPercent: JACKPOT_CONTRIBUTION_PERCENT };
@@ -204,13 +216,18 @@ export async function jackpotView(env: Env, now = Date.now()) {
 export async function weeklyLeaderboard(env: Env, now = Date.now(), limit = 10) {
   const start = weekStartMs(now);
   const result = await env.DB.prepare(`
-    SELECT u.telegram_id, u.username, u.first_name,
+    SELECT u.id, u.username, u.first_name,
       COALESCE(SUM(CASE WHEN p.amount > 0 THEN p.amount ELSE 0 END), 0) AS points
     FROM users u
     LEFT JOIN point_ledger p ON p.user_id = u.id AND p.created_at >= ?
     GROUP BY u.id
     ORDER BY points DESC, u.id ASC
     LIMIT ?
-  `).bind(start, Math.min(Math.max(limit, 1), 100)).all<{ telegram_id: string; username: string | null; first_name: string; points: number }>();
-  return result.results || [];
+  `).bind(start, Math.min(Math.max(limit, 1), 100)).all<{ id: number; username: string | null; first_name: string; points: number }>();
+  return (result.results || []).map((row) => ({
+    public_id: publicPlayerId(row.id),
+    username: row.username,
+    first_name: row.first_name,
+    points: Number(row.points || 0),
+  }));
 }

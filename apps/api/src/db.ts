@@ -117,7 +117,6 @@ export async function taskView(env: Env, user: UserRow) {
   return TASKS.map((task) => {
     let progress = 0;
     if (task.metric === 'taps') progress = user.taps;
-    if (task.metric === 'wallet') progress = user.wallet_address ? 1 : 0;
     if (task.metric === 'referrals') progress = refs;
     if (task.metric === 'points') progress = user.total_earned;
     return { ...task, progress: Math.min(progress, task.target), completed: progress >= task.target, claimed: claimed.has(task.id) };
@@ -207,8 +206,13 @@ export async function profileView(env: Env, user: UserRow) {
 }
 
 export async function leaderboard(env: Env, limit = 20) {
-  const result = await env.DB.prepare('SELECT telegram_id, username, first_name, total_earned AS points FROM users ORDER BY total_earned DESC, id ASC LIMIT ?')
+  const result = await env.DB.prepare('SELECT id, username, first_name, total_earned AS points FROM users ORDER BY total_earned DESC, id ASC LIMIT ?')
     .bind(Math.min(Math.max(limit, 1), 100))
-    .all<{ telegram_id: string; username: string | null; first_name: string; points: number }>();
-  return result.results || [];
+    .all<{ id: number; username: string | null; first_name: string; points: number }>();
+  return (result.results || []).map((row) => ({
+    public_id: `p${Number(row.id).toString(36)}`,
+    username: row.username,
+    first_name: row.first_name,
+    points: Number(row.points || 0),
+  }));
 }

@@ -413,7 +413,7 @@ export default function App() {
 
           <section className="jackpot-card"><div className="section-title"><h2>جایزه بزرگ</h2><span>{nf.format(data.jackpot.pool)} امتیاز</span></div><p>جایزه فعلی از بخشی از خریدهای ارتقا ساخته می‌شود. قرعه بعدی: {durationLabel(jackpotRemainingSeconds)}</p>{data.jackpot.lastWinner && <small>برنده قبلی: {data.jackpot.lastWinner.name} · +{nf.format(data.jackpot.lastWinner.amount)} امتیاز</small>}</section>
 
-          <section className="mini-board"><div className="section-title"><h2>برترین‌های هفته</h2><span>{leagueLabel(league.current.name)}</span></div>{data.weeklyLeaderboard.slice(0, 5).map((leader, index) => <div className="leader" key={leader.telegram_id}><span className="rank">{index + 1}</span><b>{leader.username ? `@${leader.username}` : leader.first_name}</b><strong>{nf.format(leader.points)}</strong></div>)}</section>
+          <section className="mini-board"><div className="section-title"><h2>برترین‌های هفته</h2><span>{leagueLabel(league.current.name)}</span></div>{data.weeklyLeaderboard.slice(0, 5).map((leader, index) => <div className="leader" key={leader.public_id}><span className="rank">{index + 1}</span><b>{leader.username ? `@${leader.username}` : leader.first_name}</b><strong>{nf.format(leader.points)}</strong></div>)}</section>
         </>}
 
         {tab === 'boost' && <section className="panel boost-panel">

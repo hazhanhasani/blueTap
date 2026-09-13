@@ -2,14 +2,18 @@
   "name": "bluetap",
   "version": "0.1.0",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev:web": "npm run dev -w @bluetap/web",
     "dev:api": "npm run dev -w @bluetap/api",
     "build": "npm run build -w @bluetap/web && npm run typecheck -w @bluetap/api",
-    "typecheck": "npm run typecheck -w @bluetap/web && npm run typecheck -w @bluetap/api"
+    "typecheck": "npm run typecheck -w @bluetap/web && npm run typecheck -w @bluetap/api",
+    "test": "node --test tests/*.test.mjs"
   },
   "engines": {
-    "node": ">=20"
-  }
+    "node": ">=22.12 <23"
+  },
+  "packageManager": "npm@10.9.8"
 }

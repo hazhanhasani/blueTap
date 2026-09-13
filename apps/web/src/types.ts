@@ -91,7 +91,7 @@ export interface Challenge extends Task {
 }
 
 export interface Leader {
-  telegram_id: string;
+  public_id: string;
   username: string | null;
   first_name: string;
   points: number;
@@ -112,7 +112,7 @@ export interface Skin {
 export interface JackpotState {
   pool: number;
   nextDrawAt: number;
-  lastWinner: { telegramId: string; name: string; amount: number; at: number } | null;
+  lastWinner: { name: string; amount: number; at: number } | null;
   contributionPercent: number;
 }
 

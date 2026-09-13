@@ -30,7 +30,7 @@ export const LEVELS = [
 
 export const TASKS = [
   { id: 'taps_50', title: '۵۰ بار ضربه بزن', reward: 250, target: 50, metric: 'taps' },
-  { id: 'wallet', title: 'کیف پول TON را متصل کن', reward: 500, target: 1, metric: 'wallet' },
+  { id: 'taps_500', title: '۵۰۰ بار ضربه بزن', reward: 500, target: 500, metric: 'taps' },
   { id: 'referral_1', title: 'یک دوست دعوت کن', reward: 1_000, target: 1, metric: 'referrals' },
   { id: 'points_5000', title: 'به ۵٬۰۰۰ امتیاز برس', reward: 2_500, target: 5_000, metric: 'points' },
 ] as const;

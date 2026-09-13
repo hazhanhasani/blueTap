@@ -1,77 +1,63 @@
 # راه‌اندازی BlueTap
 
-## ۱. Bot تلگرام
+## وضعیت Production
 
-ربات پروژه ساخته شده است:
+BlueTap به‌صورت یک Cloudflare Worker واحد Deploy می‌شود. Worker هم API و Webhook تلگرام را اجرا می‌کند و هم خروجی `apps/web/dist` را به‌عنوان Mini App سرو می‌کند.
 
-- Username: `@bluecoinxbot`
-- Link: `https://t.me/bluecoinxbot`
+- Bot: `@bluecoinxbot`
+- Production URL: `https://bluetap.hazhanhasani4268-0f9.workers.dev`
+- D1 database: `bluetap`
+- `ALLOW_DEV_AUTH=false` در Production
+- `ALLOWED_ORIGIN=https://bluetap.hazhanhasani4268-0f9.workers.dev`
 
-Bot Token را فقط به‌عنوان Secret در Cloudflare ذخیره کن و هرگز داخل GitHub یا Frontend قرار نده.
+## Secretهای لازم
 
-بعد از Deploy شدن Mini App، از BotFather برای همین ربات یک Menu Button / Mini App URL تنظیم می‌کنیم.
+این مقادیر فقط باید به‌عنوان Secret نگهداری شوند و نباید داخل GitHub یا Frontend قرار بگیرند:
 
-## ۲. D1
+```text
+TELEGRAM_BOT_TOKEN
+TELEGRAM_WEBHOOK_SECRET
+CLOUDFLARE_API_TOKEN       # GitHub Actions
+CLOUDFLARE_ACCOUNT_ID      # GitHub Actions
+```
 
-از پوشه `apps/api`:
+## Deploy
+
+Push روی `main`، Workflow `BlueTap CI/CD` را اجرا می‌کند:
+
+1. `npm ci`
+2. تست‌های امنیتی Regression
+3. Typecheck
+4. Build Mini App
+5. اعمال D1 migrations
+6. Deploy Worker + assets
+7. Smoke test روی `/health` و `tonconnect-manifest.json`
+
+برای Deploy دستی:
 
 ```bash
-npx wrangler login
-npx wrangler d1 create bluetap
+npm ci
+npm test
+npm run typecheck
+npm run build
+npx wrangler d1 migrations apply bluetap --remote --config apps/api/wrangler.toml
+npx wrangler deploy --config apps/api/wrangler.toml
 ```
 
-`database_id` خروجی را در `wrangler.toml` جایگزین کن و سپس:
+## Telegram
 
-```bash
-npm run db:migrate:remote
+Webhook باید به این مسیر اشاره کند:
+
+```text
+https://bluetap.hazhanhasani4268-0f9.workers.dev/telegram/webhook
 ```
 
-## ۳. Secretهای Worker
+در BotFather، Menu Button / Mini App URL نیز باید روی Production URL تنظیم شود.
 
-```bash
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-```
+## TON Connect
 
-`BOT_USERNAME` در `wrangler.toml` روی `bluecoinxbot` تنظیم شده است. در Production مقدار `ALLOW_DEV_AUTH` باید `false` بماند.
+`apps/web/public/tonconnect-manifest.json` روی Production URL تنظیم شده است. اتصال ساده کیف پول فقط آدرس را ثبت می‌کند و به‌عنوان اثبات مالکیت یا شرط دریافت BLUEX استفاده نمی‌شود.
 
-سپس:
+## Claim واقعی BLUEX
 
-```bash
-npm run deploy
-```
-
-## ۴. Frontend
-
-فایل `apps/web/.env` بساز:
-
-```env
-VITE_API_BASE_URL=https://YOUR-WORKER.workers.dev
-VITE_TONCONNECT_MANIFEST_URL=https://YOUR-MINIAPP-DOMAIN/tonconnect-manifest.json
-```
-
-در `public/tonconnect-manifest.json` دامنه واقعی Mini App را جایگزین `replace-with-your-production-domain.example` کن.
-
-سپس:
-
-```bash
-npm run build -w @bluetap/web
-```
-
-خروجی `apps/web/dist` را روی Cloudflare Pages یا هر هاست HTTPS استاتیک منتشر کن.
-
-## ۵. تست محلی
-
-برای API فایل `.dev.vars` را از `.dev.vars.example` بساز. `ALLOW_DEV_AUTH=true` فقط برای Local Development است.
-
-در Frontend نیز `VITE_DEV_TELEGRAM_ID` باعث فعال شدن حساب تست می‌شود.
-
-## قبل از Claim واقعی BLUEX
-
-- TON Proof برای اثبات مالکیت کیف پول
-- سقف کل Season و فرمول تبدیل Points -> BLUEX
-- خزانه جداگانه و ترجیحاً Multisig
-- محدودیت برداشت، صف بررسی و Idempotency
-- ضد Sybil/Referral abuse
-- Audit لاگ و تست بار
-
-تا انجام این موارد endpoint برداشت عمداً HTTP 423 برمی‌گرداند.
+Claim واقعی همچنان قفل است. قبل از فعال‌سازی باید TON Proof، خزانه امن/Multisig، سقف Season، سیاست ضد Sybil، محدودیت برداشت و Idempotency نهایی شوند.

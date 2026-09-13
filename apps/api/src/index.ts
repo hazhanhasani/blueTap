@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
 import { authenticateRequest } from './telegram';
 import { handleTelegramUpdate } from './bot';
 import {
@@ -52,7 +51,30 @@ import type { Env, TelegramAuth, UserRow } from './types';
 type Variables = { auth: TelegramAuth };
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type', 'X-Dev-Telegram-Id', 'X-Dev-First-Name', 'X-Referral-Code'] }));
+const CORS_ALLOW_HEADERS = 'Authorization, Content-Type, X-Dev-Telegram-Id, X-Dev-First-Name, X-Referral-Code';
+
+app.use('*', async (c, next) => {
+  const origin = c.req.header('Origin') || '';
+  const configuredOrigin = (c.env.ALLOWED_ORIGIN || '').trim();
+  const requestOrigin = new URL(c.req.url).origin;
+  const localDevOrigin = c.env.ALLOW_DEV_AUTH === 'true' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+  const originAllowed = !origin || configuredOrigin === '*' || origin === configuredOrigin || origin === requestOrigin || localDevOrigin;
+
+  if (origin && !originAllowed) return c.json({ error: 'Origin not allowed' }, 403);
+
+  if (c.req.method === 'OPTIONS') {
+    if (origin) c.header('Access-Control-Allow-Origin', origin);
+    c.header('Vary', 'Origin');
+    c.header('Access-Control-Allow-Headers', CORS_ALLOW_HEADERS);
+    c.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    c.header('Access-Control-Max-Age', '86400');
+    return c.body(null, 204);
+  }
+
+  await next();
+  if (origin) c.header('Access-Control-Allow-Origin', origin);
+  c.header('Vary', 'Origin');
+});
 
 app.get('/health', (c) => c.json({
   ok: true,
@@ -87,6 +109,16 @@ async function currentUser(c: any): Promise<UserRow> {
   const auth = c.get('auth') as TelegramAuth;
   const { user } = await ensureUser(c.env as Env, auth);
   return user;
+}
+
+async function appendLedger(env: Env, userId: number, amount: number, kind: string, metadata: unknown, createdAt: number) {
+  try {
+    await env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)')
+      .bind(userId, amount, kind, JSON.stringify(metadata), createdAt)
+      .run();
+  } catch (error) {
+    console.error('Point ledger append failed', { userId, amount, kind, error });
+  }
 }
 
 async function settleAutoMine(env: Env, user: UserRow, now = Date.now(), manualConfirm = false) {
@@ -170,6 +202,24 @@ app.post('/api/tap', async (c) => {
   const energyPerTap = tapRewardPerTap(user, now);
   const affordableTaps = Math.floor(energy / energyPerTap);
   const awardedTaps = Math.max(0, Math.min(requested, Math.floor(bucket), affordableTaps));
+
+  if (awardedTaps <= 0) {
+    const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
+    const currentCombo = Number(user.combo_count || 0);
+    return c.json({
+      awarded: 0,
+      awardedTaps: 0,
+      tapValue: energyPerTap,
+      energySpent: 0,
+      luckyBonus: 0,
+      luckyHits: 0,
+      highestLuckyMultiplier: 1,
+      comboCount: currentCombo,
+      comboMultiplier: comboMultiplierForCount(currentCombo),
+      profile: await profileView(c.env, fresh),
+    });
+  }
+
   const nextBucket = Math.max(0, bucket - awardedTaps);
   const event = blueHourState(now);
   const prestige = prestigeMultiplier(Number(user.prestige_level || 0));
@@ -191,17 +241,33 @@ app.post('/api/tap', async (c) => {
     awarded += normalReward * luckyMultiplier;
   }
   const energySpent = awardedTaps * energyPerTap;
-  await c.env.DB.batch([
-    c.env.DB.prepare(`
-      UPDATE users
-      SET points = points + ?, total_earned = total_earned + ?, taps = taps + ?, energy = ?, last_energy_at = ?,
-          tap_bucket = ?, tap_bucket_at = ?, combo_count = ?, combo_last_at = ?, lucky_hits = lucky_hits + ?,
-          daily_taps = daily_taps + ?, weekly_taps = weekly_taps + ?, updated_at = ?
-      WHERE id = ?
-    `).bind(awarded, awarded, awardedTaps, energy - energySpent, now, nextBucket, now, comboCount, now, luckyHits, awardedTaps, awardedTaps, now, user.id),
-    c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)')
-      .bind(user.id, awarded, 'tap', JSON.stringify({ requested, awardedTaps, energyPerTap, energySpent, comboCount, luckyBonus, highestLuckyMultiplier, event: event.active ? event.name : null }), now),
-  ]);
+
+  const updated = await c.env.DB.prepare(`
+    UPDATE users
+    SET points = points + ?, total_earned = total_earned + ?, taps = taps + ?, energy = ?, last_energy_at = ?,
+        tap_bucket = ?, tap_bucket_at = ?, combo_count = ?, combo_last_at = ?, lucky_hits = lucky_hits + ?,
+        daily_taps = daily_taps + ?, weekly_taps = weekly_taps + ?, updated_at = ?
+    WHERE id = ?
+      AND taps = ? AND energy = ? AND last_energy_at = ? AND tap_bucket_at = ?
+      AND combo_count = ? AND combo_last_at = ?
+  `).bind(
+    awarded, awarded, awardedTaps, energy - energySpent, now,
+    nextBucket, now, comboCount, now, luckyHits,
+    awardedTaps, awardedTaps, now,
+    user.id, user.taps, user.energy, user.last_energy_at, user.tap_bucket_at,
+    user.combo_count, user.combo_last_at,
+  ).run();
+
+  if (!updated.meta.changes) {
+    const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
+    return c.json({ error: 'Tap state changed; retry', profile: await profileView(c.env, fresh) }, 409);
+  }
+
+  await appendLedger(c.env, user.id, awarded, 'tap', {
+    requested, awardedTaps, energyPerTap, energySpent, comboCount, luckyBonus,
+    highestLuckyMultiplier, event: event.active ? event.name : null,
+  }, now);
+
   const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
   return c.json({ awarded, awardedTaps, tapValue: energyPerTap, energySpent, luckyBonus, luckyHits, highestLuckyMultiplier, comboCount, comboMultiplier: comboMultiplierForCount(comboCount), profile: await profileView(c.env, fresh) });
 });
@@ -331,27 +397,56 @@ app.post('/api/chest/claim', async (c) => {
   const now = Date.now();
   const settled = await settleAutoMine(c.env, user, now);
   let current = settled.user;
-  const state = chestState(Number(current.last_chest_at || 0), now);
+  const expectedLastChestAt = Number(current.last_chest_at || 0);
+  const state = chestState(expectedLastChestAt, now);
   if (!state.ready) return c.json({ error: 'صندوق هنوز آماده نیست' }, 409);
+
   const maxEnergy = energyProgression(current).maxEnergy;
   let reward = rollChestReward(maxEnergy);
-  if (reward.type === 'shield' && Number(current.mining_shields || 0) >= MAX_MINING_SHIELDS) reward = { type: 'points', amount: 1_000, label: '+1,000 BP (Shield کامل بود)' };
-  const statements: any[] = [];
-  if (reward.type === 'points') statements.push(c.env.DB.prepare('UPDATE users SET points = points + ?, total_earned = total_earned + ?, last_chest_at = ?, updated_at = ? WHERE id = ?').bind(reward.amount, reward.amount, now, now, current.id));
-  else if (reward.type === 'energy') {
+  if (reward.type === 'shield' && Number(current.mining_shields || 0) >= MAX_MINING_SHIELDS) {
+    reward = { type: 'points', amount: 1_000, label: '+1,000 BP (Shield کامل بود)' };
+  }
+
+  let updated;
+  if (reward.type === 'points') {
+    updated = await c.env.DB.prepare(`
+      UPDATE users SET points = points + ?, total_earned = total_earned + ?, last_chest_at = ?, updated_at = ?
+      WHERE id = ? AND last_chest_at = ?
+    `).bind(reward.amount, reward.amount, now, now, current.id, expectedLastChestAt).run();
+  } else if (reward.type === 'energy') {
     const nextEnergy = Math.min(maxEnergy, effectiveEnergy(current, now) + reward.amount);
-    statements.push(c.env.DB.prepare('UPDATE users SET energy = ?, last_energy_at = ?, last_chest_at = ?, updated_at = ? WHERE id = ?').bind(nextEnergy, now, now, now, current.id));
-  } else if (reward.type === 'shield') statements.push(c.env.DB.prepare('UPDATE users SET mining_shields = mining_shields + 1, last_chest_at = ?, updated_at = ? WHERE id = ?').bind(now, now, current.id));
-  else if (reward.type === 'auto_boost') {
+    updated = await c.env.DB.prepare(`
+      UPDATE users SET energy = ?, last_energy_at = ?, last_chest_at = ?, updated_at = ?
+      WHERE id = ? AND last_chest_at = ? AND energy = ? AND last_energy_at = ?
+    `).bind(nextEnergy, now, now, now, current.id, expectedLastChestAt, current.energy, current.last_energy_at).run();
+  } else if (reward.type === 'shield') {
+    updated = await c.env.DB.prepare(`
+      UPDATE users SET mining_shields = mining_shields + 1, last_chest_at = ?, updated_at = ?
+      WHERE id = ? AND last_chest_at = ? AND mining_shields = ? AND mining_shields < ?
+    `).bind(now, now, current.id, expectedLastChestAt, current.mining_shields, MAX_MINING_SHIELDS).run();
+  } else if (reward.type === 'auto_boost') {
     const boostUntil = Math.max(now, Number(current.auto_mine_boost_until || 0)) + reward.durationMs;
-    statements.push(c.env.DB.prepare('UPDATE users SET auto_mine_boost_until = ?, auto_mine_last_at = ?, auto_mine_confirmed_at = ?, last_chest_at = ?, updated_at = ? WHERE id = ?').bind(boostUntil, now, now, now, now, current.id));
+    updated = await c.env.DB.prepare(`
+      UPDATE users
+      SET auto_mine_boost_until = ?, auto_mine_last_at = ?, auto_mine_confirmed_at = ?, last_chest_at = ?, updated_at = ?
+      WHERE id = ? AND last_chest_at = ? AND auto_mine_boost_until = ?
+        AND auto_mine_last_at = ? AND auto_mine_confirmed_at = ?
+    `).bind(boostUntil, now, now, now, now, current.id, expectedLastChestAt,
+      current.auto_mine_boost_until, current.auto_mine_last_at, current.auto_mine_confirmed_at).run();
   } else {
     const turboUntil = Math.max(now, Number(current.turbo_until || 0)) + reward.durationMs;
-    statements.push(c.env.DB.prepare('UPDATE users SET turbo_until = ?, last_chest_at = ?, updated_at = ? WHERE id = ?').bind(turboUntil, now, now, current.id));
+    updated = await c.env.DB.prepare(`
+      UPDATE users SET turbo_until = ?, last_chest_at = ?, updated_at = ?
+      WHERE id = ? AND last_chest_at = ? AND turbo_until = ?
+    `).bind(turboUntil, now, now, current.id, expectedLastChestAt, current.turbo_until).run();
   }
-  const ledgerAmount = reward.type === 'points' ? reward.amount : 0;
-  statements.push(c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(current.id, ledgerAmount, 'chest', JSON.stringify(reward), now));
-  await c.env.DB.batch(statements);
+
+  if (!updated.meta.changes) {
+    current = (await getUserByTelegramId(c.env, current.telegram_id))!;
+    return c.json({ error: 'وضعیت صندوق تغییر کرد؛ دوباره تلاش کن', profile: await profileView(c.env, current) }, 409);
+  }
+
+  await appendLedger(c.env, current.id, reward.type === 'points' ? reward.amount : 0, 'chest', reward, now);
   current = (await getUserByTelegramId(c.env, current.telegram_id))!;
   return c.json({ reward, burned: settled.burned, shieldUsed: settled.shieldUsed, profile: await profileView(c.env, current) });
 });
@@ -385,10 +480,13 @@ app.post('/api/daily', async (c) => {
   const streak = isYesterday(user.last_daily_day, day) ? Number(user.daily_streak || 0) + 1 : 1;
   const { day: streakDay, reward } = dailyRewardForStreak(streak);
   const now = Date.now();
-  await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE users SET points = points + ?, total_earned = total_earned + ?, last_daily_day = ?, daily_streak = ?, updated_at = ? WHERE id = ?').bind(reward, reward, day, streak, now, user.id),
-    c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(user.id, reward, 'daily', JSON.stringify({ streak, streakDay }), now),
-  ]);
+  const updated = await c.env.DB.prepare(`
+    UPDATE users
+    SET points = points + ?, total_earned = total_earned + ?, last_daily_day = ?, daily_streak = ?, updated_at = ?
+    WHERE id = ? AND COALESCE(last_daily_day, '') <> ?
+  `).bind(reward, reward, day, streak, now, user.id, day).run();
+  if (!updated.meta.changes) return c.json({ error: 'Daily reward already claimed' }, 409);
+  await appendLedger(c.env, user.id, reward, 'daily', { streak, streakDay }, now);
   const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
   return c.json({ reward, streak, streakDay, profile: await profileView(c.env, fresh) });
 });
