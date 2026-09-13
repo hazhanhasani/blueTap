@@ -87,9 +87,11 @@ app.post('/api/tap', async (c) => {
   const now = Date.now();
   const energy = effectiveEnergy(user, now);
   const bucket = effectiveTapBucket(user, now);
-  const awardedTaps = Math.max(0, Math.min(requested, Math.floor(bucket), energy));
   const tapValue = tapRewardPerTap(user, now);
+  const affordableTaps = Math.floor(energy / tapValue);
+  const awardedTaps = Math.max(0, Math.min(requested, Math.floor(bucket), affordableTaps));
   const awarded = awardedTaps * tapValue;
+  const energySpent = awarded;
   const nextBucket = Math.max(0, bucket - awardedTaps);
 
   await c.env.DB.batch([
@@ -97,13 +99,13 @@ app.post('/api/tap', async (c) => {
       UPDATE users
       SET points = points + ?, total_earned = total_earned + ?, taps = taps + ?, energy = ?, last_energy_at = ?, tap_bucket = ?, tap_bucket_at = ?, updated_at = ?
       WHERE id = ?
-    `).bind(awarded, awarded, awardedTaps, energy - awardedTaps, now, nextBucket, now, now, user.id),
+    `).bind(awarded, awarded, awardedTaps, energy - energySpent, now, nextBucket, now, now, user.id),
     c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)')
-      .bind(user.id, awarded, 'tap', JSON.stringify({ requested, awardedTaps, tapValue, turbo: isTurboActive(user, now) }), now),
+      .bind(user.id, awarded, 'tap', JSON.stringify({ requested, awardedTaps, tapValue, energySpent, turbo: isTurboActive(user, now) }), now),
   ]);
 
   const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
-  return c.json({ awarded, awardedTaps, tapValue, profile: await profileView(c.env, fresh) });
+  return c.json({ awarded, awardedTaps, tapValue, energySpent, profile: await profileView(c.env, fresh) });
 });
 
 app.post('/api/upgrades/tap-power', async (c) => {
