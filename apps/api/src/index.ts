@@ -52,7 +52,7 @@ import type { Env, TelegramAuth, UserRow } from './types';
 type Variables = { auth: TelegramAuth };
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type', 'X-Dev-Telegram-Id', 'X-Dev-First-Name'] }));
+app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type', 'X-Dev-Telegram-Id', 'X-Dev-First-Name', 'X-Referral-Code'] }));
 
 app.get('/health', (c) => c.json({
   ok: true,
@@ -156,7 +156,7 @@ app.get('/api/bootstrap', async (c) => {
     weeklyLeaderboard(c.env, Date.now(), 10),
     jackpotView(c.env),
   ]);
-  const inviteUrl = c.env.BOT_USERNAME ? `https://t.me/${c.env.BOT_USERNAME}?startapp=ref_${user.referral_code}` : null;
+  const inviteUrl = c.env.BOT_USERNAME ? `https://t.me/${c.env.BOT_USERNAME}?start=ref_${user.referral_code}` : null;
   return c.json({ profile, tasks, challenges, league, leaderboard: leaders, weeklyLeaderboard: weeklyLeaders, skins: SKINS, jackpot, inviteUrl, token: { symbol: 'BLUEX', jettonMaster: c.env.BLUEX_JETTON_MASTER }, season: { name: 'Season 1', claimEnabled: false } });
 });
 
