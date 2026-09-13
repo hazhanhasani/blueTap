@@ -3,7 +3,7 @@ import type { Env } from './types';
 type TelegramMessage = {
   chat?: { id?: number | string };
   text?: string;
-  from?: { first_name?: string };
+  from?: { id?: number | string; first_name?: string };
 };
 
 type TelegramUpdate = {
@@ -31,6 +31,13 @@ function referralFromStart(text: string): string | null {
   return /^bt[a-z0-9]+$/i.test(code) ? code : null;
 }
 
+async function rememberReferral(env: Env, telegramId: number | string, referralCode: string): Promise<void> {
+  await env.DB.prepare(`
+    INSERT OR IGNORE INTO pending_referrals (telegram_id, referral_code, created_at, consumed_at)
+    VALUES (?, ?, ?, NULL)
+  `).bind(String(telegramId), referralCode, Date.now()).run();
+}
+
 function webAppUrl(appUrl: string, referralCode: string | null): string {
   const url = new URL(appUrl);
   if (referralCode) url.searchParams.set('ref', referralCode);
@@ -47,10 +54,13 @@ export async function handleTelegramUpdate(update: TelegramUpdate, env: Env, app
 
   if (text.startsWith('/start')) {
     const referralCode = referralFromStart(text);
+    if (referralCode && message?.from?.id) {
+      await rememberReferral(env, message.from.id, referralCode);
+    }
     await telegramApi(env, 'sendMessage', {
       chat_id: chatId,
       text: referralCode
-        ? `${firstName}، دعوتت ثبت شد. وارد BlueTap شو و بازی را شروع کن.`
+        ? `${firstName}، لینک دعوت شناسایی شد. برای تکمیل دعوت وارد BlueTap شو.`
         : `${firstName}، به BlueTap خوش آمدی.`,
       reply_markup: {
         inline_keyboard: [[

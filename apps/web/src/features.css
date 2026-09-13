@@ -68,3 +68,11 @@
   .task { grid-template-columns: 1fr; gap: 8px; }
   .task button { width: 100%; }
 }
+
+/* Referral UX */
+.friend-actions { display: grid; grid-template-columns: 1.35fr 1fr; gap: 8px; margin-top: 10px; }
+.friend-actions .primary, .secondary-action { min-height: 46px; border-radius: 13px; font-weight: 800; cursor: pointer; }
+.secondary-action { border: 1px solid #cfe3f7; background: #f3f8fe; color: #176fc1; padding: 12px; }
+.friend-actions button:active { transform: scale(.98); }
+.friends-refresh-note { display: block; margin-top: 9px; color: #8393a7; font-size: 10px; }
+@media (max-width: 360px) { .friend-actions { grid-template-columns: 1fr; } }

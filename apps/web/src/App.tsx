@@ -109,6 +109,18 @@ export default function App() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
+    if (tab !== 'friends' || !telegramAccessAllowed) return;
+    void load();
+    const refresh = window.setInterval(() => void load(), 15_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') void load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(refresh);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [tab, telegramAccessAllowed, load]);
+
+  useEffect(() => {
     energyRef.current = profile?.energy ?? 0;
   }, [profile?.energy]);
 
@@ -322,8 +334,30 @@ export default function App() {
 
   const copyInvite = async () => {
     if (!data?.inviteUrl) return;
-    await navigator.clipboard.writeText(data.inviteUrl);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(data.inviteUrl);
+    } catch {
+      const area = document.createElement('textarea');
+      area.value = data.inviteUrl;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      area.remove();
+    }
+    setFlash('🔗 لینک دعوت کپی شد');
     window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+  };
+
+  const shareInvite = () => {
+    if (!data?.inviteUrl) return;
+    const text = 'با لینک من وارد BlueTap شو و ۱۰۰ امتیاز شروع بگیر.';
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(data.inviteUrl)}&text=${encodeURIComponent(text)}`;
+    if (window.Telegram?.WebApp?.openTelegramLink) window.Telegram.WebApp.openTelegramLink(shareUrl);
+    else window.open(shareUrl, '_blank', 'noopener,noreferrer');
   };
 
   const levelProgress = useMemo(() => {
@@ -406,7 +440,7 @@ export default function App() {
           {tasks.map((task) => <article className="task" key={task.id}><div className="task-copy"><b>{task.title}</b><small>پاداش: +{nf.format(task.reward)}</small><div className="task-track"><i style={{ width: `${Math.min(100, (task.progress / task.target) * 100)}%` }} /></div><em>{nf.format(task.progress)} / {nf.format(task.target)}</em></div><button disabled={!task.completed || task.claimed || busy} onClick={() => claimTask(task.id)}>{task.claimed ? 'گرفته شد' : task.completed ? 'دریافت' : 'در حال انجام'}</button></article>)}
         </section>}
 
-        {tab === 'friends' && <section className="panel friends"><div className="hero-icon">👥</div><h2>دوستانت را دعوت کن</h2><p>برای هر دعوت موفق ۵۰۰ امتیاز می‌گیری و دوستت ۱۰۰ امتیاز شروع دریافت می‌کند.</p><div className="stat"><span>دعوت‌های موفق</span><strong>{nf.format(profile.referrals)}</strong></div>{data.inviteUrl ? <><button className="primary" onClick={copyInvite}>کپی لینک دعوت</button><code>{data.inviteUrl}</code></> : <p className="notice">لینک دعوت فعلاً در دسترس نیست.</p>}</section>}
+        {tab === 'friends' && <section className="panel friends"><div className="hero-icon">👥</div><h2>دوستانت را دعوت کن</h2><p>برای هر دعوت موفق ۵۰۰ امتیاز می‌گیری و دوستت ۱۰۰ امتیاز شروع دریافت می‌کند.</p><div className="stat"><span>دعوت‌های موفق</span><strong>{nf.format(profile.referrals)}</strong></div>{data.inviteUrl ? <><div className="friend-actions"><button className="primary" onClick={shareInvite}>دعوت در تلگرام</button><button className="secondary-action" onClick={copyInvite}>کپی لینک</button></div><code>{data.inviteUrl}</code><small className="friends-refresh-note">تعداد دعوت‌های موفق به‌صورت خودکار به‌روز می‌شود.</small></> : <p className="notice">لینک دعوت فعلاً در دسترس نیست.</p>}</section>}
         {tab === 'wallet' && <section className="panel wallet-panel"><div className="hero-icon">💎</div><h2>کیف پول TON</h2><p>کیف پول TON را متصل کن تا برای دریافت پاداش‌های آینده آماده باشی.</p><TonConnectButton />{profile.walletAddress && <div className="wallet-address"><span>کیف پول ثبت‌شده</span><code>{shortAddress(profile.walletAddress)}</code></div>}<div className="token-box"><span>توکن بازی</span><b>BlueCoin · BLUEX</b><small>دریافت توکن هنوز فعال نشده است</small></div><button className="claim-locked" disabled>🔒 دریافت BLUEX — به‌زودی</button></section>}
       </section>
 
