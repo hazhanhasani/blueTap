@@ -32,6 +32,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .tap-hint { text-align: center; color: #73869e; margin: 0 0 4px; font-size: 12px; }
 .energy-card { padding: 14px 16px; border-radius: 18px; }
 .energy-card > div:first-child { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; }
+.energy-meta { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; color: #73869e; font-size: 10px; line-height: 1.6; }
+.energy-meta small:last-child { text-align: left; }
 .quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .quick-card { border-radius: 18px; border: 1px solid #dcecff; padding: 14px; text-align: right; cursor: pointer; color: inherit; }
 .quick-card:disabled { opacity: .65; cursor: default; }
@@ -101,4 +103,4 @@ button { -webkit-tap-highlight-color: transparent; }
   0%, 100% { transform: scale(.96); opacity: .65; }
   50% { transform: scale(1.06); opacity: 1; }
 }
-@media (max-width: 380px) { .coin-stage { width: 190px; height: 190px; } .coin-ring { width: 145px; height: 145px; } .coin-ring b { font-size: 72px; } .bottom-nav button { font-size: 8px; } }
+@media (max-width: 380px) { .coin-stage { width: 190px; height: 190px; } .coin-ring { width: 145px; height: 145px; } .coin-ring b { font-size: 72px; } .bottom-nav button { font-size: 8px; } .energy-meta { flex-direction: column; } .energy-meta small:last-child { text-align: right; } }
