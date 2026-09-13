@@ -143,7 +143,6 @@ export default function App() {
       }>('/api/tap', { method: 'POST', body: JSON.stringify({ count }) });
       applyServerProfile(response.profile);
       if (response.luckyHits > 0) setFlash(`🍀 ضربه شانسی ×${nf.format(response.highestLuckyMultiplier)} · +${nf.format(response.luckyBonus)} امتیاز`);
-      else if (response.comboMultiplier > 1) setFlash(`🔥 زنجیره ×${nf.format(response.comboMultiplier)} · ${nf.format(response.comboCount)} ضربه`);
     } catch (e) {
       pendingTaps.current = 0;
       setError(friendlyError(e, 'ثبت ضربه انجام نشد.'));
