@@ -1,0 +1,241 @@
+name: BlueTap UI UX Cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/uiux-cleanup.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Clean user-facing copy and polish UI
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          app_path = Path('apps/web/src/App.tsx')
+          app = app_path.read_text()
+
+          helper_anchor = "export default function App() {"
+          helpers = r'''function friendlyError(error: unknown, fallback: string) {
+            const message = error instanceof Error ? error.message : '';
+            if (!message) return fallback;
+            if (/Unauthorized|Invalid Telegram|signature|init.?data/i.test(message)) return 'ورود تلگرام معتبر نیست. بازی را از ربات دوباره باز کن.';
+            if (/HTTP\s*5\d\d|Internal server|Failed to fetch|NetworkError|fetch/i.test(message)) return 'ارتباط با بازی برقرار نشد. چند لحظه دیگر دوباره تلاش کن.';
+            if (/Maximum .*level reached/i.test(message)) return 'به بالاترین سطح رسیده‌ای.';
+            if (/not found/i.test(message)) return 'این مورد در دسترس نیست.';
+            return /[A-Za-z]{4,}/.test(message) ? fallback : message;
+          }
+
+          function levelLabel(name: string) {
+            return ({ Starter: 'شروع', Explorer: 'کاوشگر', Wave: 'موج', Captain: 'کاپیتان', Legend: 'افسانه' } as Record<string, string>)[name] || name;
+          }
+
+          function seasonLabel(name: string) {
+            if (/season\s*1/i.test(name)) return 'فصل ۱';
+            return name;
+          }
+
+          function leagueLabel(name: string | null | undefined) {
+            if (!name) return '';
+            return ({ Bronze: 'برنزی', Silver: 'نقره‌ای', Gold: 'طلایی', Diamond: 'الماس', Master: 'استاد' } as Record<string, string>)[name] || name;
+          }
+
+          function skinLabel(name: string) {
+            return ({ 'Blue Classic': 'آبی کلاسیک', 'Neon Pulse': 'نئون', 'Golden Gram': 'طلایی', 'Cyber Blue': 'سایبری' } as Record<string, string>)[name] || name;
+          }
+
+          '''
+          if 'function friendlyError(' not in app:
+            app = app.replace(helper_anchor, helpers + helper_anchor, 1)
+
+          replacements = {
+            "setError(e instanceof Error ? e.message : 'خطا در اتصال');": "setError(friendlyError(e, 'ارتباط برقرار نشد.'));",
+            "setError(e instanceof Error ? e.message : 'ثبت ضربه ناموفق بود');": "setError(friendlyError(e, 'ثبت ضربه انجام نشد.'));",
+            "if (manual) setError(e instanceof Error ? e.message : 'تأیید ماین خودکار انجام نشد');": "if (manual) setError(friendlyError(e, 'تأیید ماین خودکار انجام نشد.'));",
+            ".catch((e) => setError(e instanceof Error ? e.message : 'خطای اتصال کیف پول'));": ".catch((e) => setError(friendlyError(e, 'اتصال کیف پول انجام نشد.')));",
+            "setError(e instanceof Error ? e.message : fallback);": "setError(friendlyError(e, fallback));",
+            "setError(e instanceof Error ? e.message : 'خطا');": "setError(friendlyError(e, 'عملیات انجام نشد.'));",
+            "setFlash(`🍀 Lucky Tap ×${nf.format(response.highestLuckyMultiplier)} · +${nf.format(response.luckyBonus)} BP`);": "setFlash(`🍀 ضربه شانسی ×${nf.format(response.highestLuckyMultiplier)} · +${nf.format(response.luckyBonus)} امتیاز`);",
+            "setFlash(`🔥 Combo ×${nf.format(response.comboMultiplier)} · ${nf.format(response.comboCount)} ضربه`);": "setFlash(`🔥 زنجیره ×${nf.format(response.comboMultiplier)} · ${nf.format(response.comboCount)} ضربه`);",
+            "setFlash(`🛡️ Mining Shield استفاده شد و ${nf.format(result.awarded)} BP نجات پیدا کرد`);": "setFlash(`🛡️ محافظ ماین فعال شد و ${nf.format(result.awarded)} امتیاز حفظ شد`);",
+            "setError(`${nf.format(result.burned)} BP ماین خودکار به‌دلیل عبور از مهلت ۵ ساعته سوخت.`);": "setError(`${nf.format(result.burned)} امتیاز ماین خودکار به‌دلیل پایان مهلت از بین رفت.`);",
+            "setFlash(`🤖 +${nf.format(result.awarded)} BP از ماین خودکار`);": "setFlash(`🤖 +${nf.format(result.awarded)} امتیاز از ماین خودکار`);",
+            "const claimDaily = () => doProfileAction('/api/daily', 'خطا در جایزه روزانه', (r) => setFlash(`🔥 روز ${nf.format(r.streakDay)} زنجیره · +${nf.format(r.reward)} BP`));": "const claimDaily = () => doProfileAction('/api/daily', 'جایزه روزانه دریافت نشد.', (r) => setFlash(`🔥 روز ${nf.format(r.streakDay)} · +${nf.format(r.reward)} امتیاز`));",
+            "const activateAutoBooster = () => doProfileAction('/api/boosters/auto-mine', 'فعال‌سازی Booster انجام نشد', () => { setAutoMineSessionConfirmed(true); setFlash('⚡ Auto Mine ×2 فعال شد'); });": "const activateAutoBooster = () => doProfileAction('/api/boosters/auto-mine', 'تقویت ماین فعال نشد.', () => { setAutoMineSessionConfirmed(true); setFlash('⚡ سرعت ماین ×۲ فعال شد'); });",
+            "const buyShield = () => doProfileAction('/api/shop/mining-shield', 'خرید Shield انجام نشد', () => setFlash('🛡️ Mining Shield اضافه شد'));": "const buyShield = () => doProfileAction('/api/shop/mining-shield', 'خرید محافظ انجام نشد.', () => setFlash('🛡️ محافظ ماین اضافه شد'));",
+            "if (!window.confirm('Prestige موجودی BP، قدرت کلیک و سطح Auto Mine را ریست می‌کند و در عوض +۵٪ پاداش دائمی می‌دهد. ادامه می‌دهی؟')) return;": "if (!window.confirm('با ارتقای ویژه، امتیاز فعلی و ارتقاهای کلیک و ماین خودکار از نو شروع می‌شوند و در عوض ۵٪ پاداش دائمی می‌گیری. ادامه می‌دهی؟')) return;",
+            "await doProfileAction('/api/prestige', 'Prestige انجام نشد', () => { setFlash('🌟 Prestige انجام شد · +۵٪ پاداش دائمی'); void load(); });": "await doProfileAction('/api/prestige', 'ارتقای ویژه انجام نشد.', () => { setFlash('🌟 ارتقای ویژه انجام شد · +۵٪ پاداش دائمی'); void load(); });",
+            "setFlash(`✅ +${nf.format(result.reward)} BP مأموریت`);": "setFlash(`✅ +${nf.format(result.reward)} امتیاز مأموریت`);",
+            "setFlash(`🏆 +${nf.format(result.reward)} BP جایزه لیگ`);": "setFlash(`🏆 +${nf.format(result.reward)} امتیاز جایزه لیگ`);",
+            "const selectSkin = (skinId: string) => doProfileAction(`/api/skins/${skinId}`, 'Skin اعمال نشد', () => setFlash('🎨 ظاهر سکه تغییر کرد'));": "const selectSkin = (skinId: string) => doProfileAction(`/api/skins/${skinId}`, 'ظاهر سکه تغییر نکرد.', () => setFlash('🎨 ظاهر سکه تغییر کرد'));",
+            "<b>دسترسی فقط از طریق تلگرام</b><p className=\"error\">BlueTap فقط از داخل Mini App رسمی تلگرام قابل استفاده است.</p>": "<b>ورود از تلگرام</b><p className=\"error\">برای ورود به BlueTap، ربات رسمی BlueCoin را در تلگرام باز کن.</p>",
+            "<span className=\"eyebrow\">{data.season.name}</span>": "<span className=\"eyebrow\">{seasonLabel(data.season.name)}</span>",
+            "<div className=\"level-pill\">Lv.{profile.level} · {profile.name}</div>": "<div className=\"level-pill\">سطح {nf.format(profile.level)} · {levelLabel(profile.name)}</div>",
+            "<div className=\"balance-card\"><span>Blue Points</span><strong>{nf.format(profile.points)}</strong><div className=\"level-track\"><i style={{ width: `${levelProgress}%` }} /></div><small>کل استخراج: {nf.format(profile.totalEarned)} · Prestige: {nf.format(profile.prestigeLevel)} (+{nf.format(profile.prestigeBonusPercent)}%)</small></div>": "<div className=\"balance-card\"><span>امتیاز شما</span><strong>{nf.format(profile.points)}</strong><div className=\"level-track\"><i style={{ width: `${levelProgress}%` }} /></div><div className=\"balance-meta\"><small>کل استخراج {nf.format(profile.totalEarned)}</small><small>پاداش دائمی +{nf.format(profile.prestigeBonusPercent)}٪</small></div></div>",
+            "🌊 {profile.event.name} · Tap ×{profile.event.tapMultiplier} ·": "🌊 ساعت آبی · امتیاز ×{profile.event.tapMultiplier} ·",
+            "🔥 Combo ×{profile.comboMultiplier} ·": "🔥 زنجیره ×{profile.comboMultiplier} ·",
+            "هر لمس پایه +{nf.format(tapReward)} · -{nf.format(tapReward)} انرژی · Combo و Lucky پاداش اضافه می‌دهند": "هر لمس +{nf.format(tapReward)} امتیاز · {nf.format(tapReward)} انرژی",
+            "Lucky Tapها: {nf.format(profile.luckyHits)}": "ضربه‌های شانسی: {nf.format(profile.luckyHits)}",
+            "+{nf.format(profile.autoMineRatePerMinute)} BP/دقیقه": "+{nf.format(profile.autoMineRatePerMinute)} امتیاز/دقیقه",
+            "{nf.format(autoMineLivePending)} BP": "{nf.format(autoMineLivePending)} امتیاز",
+            "مهلت ۵ ساعته تمام شده؛ اگر Shield نداشته باشی خروجی معلق می‌سوزد.": "مهلت تأیید تمام شده؛ اگر محافظ نداشته باشی امتیازهای معلق از بین می‌روند.",
+            "Mining Shield موجود: {nf.format(profile.miningShields)}": "محافظ موجود: {nf.format(profile.miningShields)}",
+            "مجموع سوخته: {nf.format(profile.autoMineBurnedTotal)} BP": "از دست‌رفته: {nf.format(profile.autoMineBurnedTotal)} امتیاز",
+            "<b>Blue Chest</b>": "<b>صندوق جایزه</b>",
+            "<b>Streak روزانه</b>": "<b>ورود روزانه</b>",
+            "`روز بعد +${nf.format(profile.dailyNextReward)} BP`": "`جایزه +${nf.format(profile.dailyNextReward)} امتیاز`",
+            "<h2>Jackpot جمعی</h2>": "<h2>جایزه بزرگ</h2>",
+            "{nf.format(data.jackpot.pool)} BP": "{nf.format(data.jackpot.pool)} امتیاز",
+            "{nf.format(data.jackpot.contributionPercent)}٪ خریدهای ارتقا وارد Jackpot می‌شود. قرعه بعدی:": "جایزه فعلی از بخشی از خریدهای ارتقا ساخته می‌شود. قرعه بعدی:",
+            "+{nf.format(data.jackpot.lastWinner.amount)} BP": "+{nf.format(data.jackpot.lastWinner.amount)} امتیاز",
+            "<span>{league.current.name}</span>": "<span>{leagueLabel(league.current.name)}</span>",
+            "<b>لیگ {league.current.name}</b>": "<b>لیگ {leagueLabel(league.current.name)}</b>",
+            "<span>{nf.format(profile.points)} BP</span>": "<span>{nf.format(profile.points)} امتیاز</span>",
+            "+{nf.format(profile.autoMineRatePerMinute)} <small>BP/دقیقه · Lv.{nf.format(profile.autoMineLevel)}</small>": "+{nf.format(profile.autoMineRatePerMinute)} <small>امتیاز/دقیقه · سطح {nf.format(profile.autoMineLevel)}</small>",
+            "داخل و خارج بازی فعال است و هر ۵ ساعت نیاز به تأیید دارد.": "با هر ارتقا، سرعت ماین خودکار بیشتر می‌شود.",
+            "ارتقا · {nf.format(profile.autoMineUpgradeCost)} BP": "ارتقا · {nf.format(profile.autoMineUpgradeCost)} امتیاز",
+            "ارتقای دائمی قدرت Tap؛ مصرف انرژی پایه برابر قدرت کلیک است.": "با هر ارتقا، امتیاز و مصرف انرژی هر لمس بیشتر می‌شود.",
+            "ارتقا به +{nf.format(profile.tapPower + 1)} · {nf.format(profile.tapPowerUpgradeCost)} BP": "ارتقا به +{nf.format(profile.tapPower + 1)} · {nf.format(profile.tapPowerUpgradeCost)} امتیاز",
+            "<b>Turbo ×{profile.turboMultiplier}</b>": "<b>توربو ×{profile.turboMultiplier}</b>",
+            "قدرت Tap را موقتاً چندبرابر می‌کند.": "قدرت هر لمس را برای مدت کوتاه چندبرابر می‌کند.",
+            "فعال‌سازی · ${nf.format(profile.turboCost)} BP": "فعال‌سازی · ${nf.format(profile.turboCost)} امتیاز",
+            "<b>Auto Mine Booster ×{profile.autoMineBoostMultiplier}</b>": "<b>تقویت ماین ×{profile.autoMineBoostMultiplier}</b>",
+            "سرعت ماین خودکار را دوبرابر می‌کند و زمان خریدها روی هم جمع می‌شود.": "سرعت ماین خودکار را برای مدتی دوبرابر می‌کند.",
+            "فعال‌سازی · {nf.format(profile.autoMineBoostCost)} BP": "فعال‌سازی · {nf.format(profile.autoMineBoostCost)} امتیاز",
+            "<b>Mining Shield</b>": "<b>محافظ ماین</b>",
+            "اگر مهلت ۵ ساعته را از دست بدهی، یک Shield خودکار مصرف می‌شود و BP معلق نمی‌سوزد.": "اگر تأیید را از دست بدهی، یک محافظ از امتیازهای معلق نگهداری می‌کند.",
+            "خرید · {nf.format(profile.miningShieldCost)} BP": "خرید · {nf.format(profile.miningShieldCost)} امتیاز",
+            "<b>Prestige {nf.format(profile.prestigeLevel)}</b>": "<b>ارتقای ویژه {nf.format(profile.prestigeLevel)}</b>",
+            "نیاز: {nf.format(profile.prestigeRequirement)} کل استخراج. با Prestige، BP فعلی و ارتقای Tap/Auto Mine ریست می‌شود ولی +۵٪ پاداش دائمی می‌گیری.": "نیاز: {nf.format(profile.prestigeRequirement)} کل استخراج. امتیاز و ارتقاها از نو شروع می‌شوند و ۵٪ پاداش دائمی می‌گیری.",
+            "{profile.canPrestige ? 'Prestige الآن' : 'هنوز قفل است'}": "{profile.canPrestige ? 'ارتقای ویژه' : 'هنوز قفل است'}",
+            "کاملاً تزئینی و بدون اثر روی درآمد": "فقط ظاهر سکه را تغییر می‌دهد",
+            "<b>{skin.name}</b>": "<b>{skinLabel(skin.name)}</b>",
+            "<strong>{league.current.name}</strong>": "<strong>{leagueLabel(league.current.name)}</strong>",
+            "<span>{nf.format(league.current.points)} BP</span>": "<span>{nf.format(league.current.points)} امتیاز</span>",
+            "برای {league.current.nextName}:": "برای {leagueLabel(league.current.nextName)}:",
+            "دریافت جایزه هفته قبل · {nf.format(league.previous.reward)} BP": "دریافت جایزه هفته قبل · {nf.format(league.previous.reward)} امتیاز",
+            "{task.claimed ? 'گرفته شد' : task.completed ? 'دریافت' : 'ادامه'}": "{task.claimed ? 'گرفته شد' : task.completed ? 'دریافت' : 'در حال انجام'}",
+            "<p className=\"notice\">BOT_USERNAME در Worker تنظیم نشده است.</p>": "<p className=\"notice\">لینک دعوت فعلاً در دسترس نیست.</p>",
+            "<p>کیف پول را برای Season 1 متصل کن. برداشت BLUEX تا نهایی‌شدن قوانین توزیع و TON Proof قفل است.</p>": "<p>کیف پول TON را متصل کن تا برای دریافت پاداش‌های آینده آماده باشی.</p>",
+            "<div className=\"token-box\"><span>BlueCoin</span><b>BLUEX</b><small>{shortAddress(data.token.jettonMaster)}</small></div>": "<div className=\"token-box\"><span>توکن بازی</span><b>BlueCoin · BLUEX</b><small>دریافت توکن هنوز فعال نشده است</small></div>",
+            "🔒 Claim BLUEX — به‌زودی": "🔒 دریافت BLUEX — به‌زودی",
+            ">ماموریت</button>": ">ماموریت‌ها</button>"
+          }
+
+          for old, new in replacements.items():
+            app = app.replace(old, new)
+
+          # Any remaining straightforward BP labels in JSX are user-facing points.
+          app = app.replace(' BP', ' امتیاز')
+          app = app.replace('Lv.{', 'سطح {')
+
+          # Make all generic catch messages user-friendly.
+          app = re.sub(r"setError\(e instanceof Error \? e\.message : ('[^']*')\);", r"setError(friendlyError(e, \1));", app)
+          app_path.write_text(app)
+
+          # Localize server-provided labels that are rendered directly by the client.
+          features_path = Path('apps/api/src/features.ts')
+          features = features_path.read_text()
+          feature_replacements = {
+            "name: 'Blue Classic'": "name: 'آبی کلاسیک'",
+            "name: 'Neon Pulse'": "name: 'نئون'",
+            "name: 'Golden Gram'": "name: 'طلایی'",
+            "name: 'Cyber Blue'": "name: 'سایبری'",
+            "name: 'Bronze'": "name: 'برنزی'",
+            "name: 'Silver'": "name: 'نقره‌ای'",
+            "name: 'Gold'": "name: 'طلایی'",
+            "name: 'Diamond'": "name: 'الماس'",
+            "name: 'Master'": "name: 'استاد'",
+            "label: '+500 BP'": "label: '+۵۰۰ امتیاز'",
+            "label: 'Auto Mine ×2 برای ۱۰ دقیقه'": "label: 'ماین خودکار ×۲ برای ۱۰ دقیقه'",
+            "label: '+1 Mining Shield'": "label: '+۱ محافظ ماین'",
+            "label: '+2,000 BP'": "label: '+۲٬۰۰۰ امتیاز'",
+            "label: 'Turbo رایگان برای ۶۰ ثانیه'": "label: 'توربو رایگان برای ۶۰ ثانیه'",
+            "name: 'Blue Hour'": "name: 'ساعت آبی'",
+          }
+          for old, new in feature_replacements.items():
+            features = features.replace(old, new)
+          features_path.write_text(features)
+
+          # Small mobile-first polish: clearer hierarchy, larger touch targets, less visual density.
+          css_path = Path('apps/web/src/features.css')
+          css = css_path.read_text()
+          polish = r'''
+
+          /* Mobile UX polish */
+          .balance-meta { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 9px; }
+          .balance-meta small { padding: 4px 8px; border-radius: 999px; background: #f3f8fe; color: #6f8298; font-size: 10px; }
+          .feature-flash { pointer-events: none; }
+          .quick-card, .chest-card button, .upgrade-card > button, .task button, .league-card button, .auto-mine-card > button, .skin-card { min-height: 44px; }
+          .quick-card, .upgrade-card, .chest-card, .jackpot-card, .league-card { transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
+          .quick-card:not(:disabled):active, .chest-card button:not(:disabled):active, .upgrade-card > button:not(:disabled):active, .task button:not(:disabled):active, .league-card button:not(:disabled):active, .auto-mine-card > button:not(:disabled):active, .skin-card:not(:disabled):active { transform: scale(.98); }
+          .quick-card { min-height: 96px; }
+          .upgrade-copy p { line-height: 1.65; }
+          .jackpot-card p { line-height: 1.65; }
+          .task button { min-width: 78px; }
+          .skins-title { padding-top: 4px; }
+          @media (max-width: 380px) {
+            .quick-grid { gap: 8px; }
+            .quick-card { padding: 12px; min-height: 90px; }
+            .upgrade-card { grid-template-columns: 46px 1fr; gap: 10px; padding: 13px; }
+            .upgrade-icon { width: 46px; height: 46px; border-radius: 14px; font-size: 24px; }
+            .task { grid-template-columns: 1fr; gap: 8px; }
+            .task button { width: 100%; }
+          }
+          '''
+          if '/* Mobile UX polish */' not in css:
+            css_path.write_text(css + polish)
+
+          # Improve generic touch behavior without changing visual identity.
+          styles_path = Path('apps/web/src/styles.css')
+          styles = styles_path.read_text()
+          base_polish = r'''
+
+          /* Interaction polish */
+          html { -webkit-text-size-adjust: 100%; }
+          body { overscroll-behavior-y: none; }
+          button { touch-action: manipulation; }
+          .topbar { padding-top: max(2px, env(safe-area-inset-top)); }
+          .bottom-nav button { min-height: 52px; }
+          @media (max-width: 380px) {
+            .shell { padding-inline: 12px; }
+            .balance-card { padding: 16px 14px; }
+            .balance-card strong { font-size: 32px; }
+            .coin-stage { margin-top: 10px; }
+          }
+          '''
+          if '/* Interaction polish */' not in styles:
+            styles_path.write_text(styles + base_polish)
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/uiux-cleanup.yml
+          git add apps/web/src/App.tsx apps/web/src/features.css apps/web/src/styles.css apps/api/src/features.ts
+          git commit -m "Polish UI UX and simplify player-facing copy"
+          git push origin HEAD:main
