@@ -1,0 +1,210 @@
+name: BlueTap Referral Reliability Hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/referral-debug-hotfix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Patch referral flow
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # Telegram bot: capture referral as soon as /start payload reaches the bot.
+          p = Path('apps/api/src/bot.ts')
+          s = p.read_text()
+          old = "  from?: { first_name?: string };"
+          new = "  from?: { id?: number | string; first_name?: string };"
+          assert old in s, 'bot from type target not found'
+          s = s.replace(old, new, 1)
+
+          marker = "function webAppUrl(appUrl: string, referralCode: string | null): string {"
+          helper = """async function rememberReferral(env: Env, telegramId: number | string, referralCode: string): Promise<void> {\n  await env.DB.prepare(`\n    INSERT OR IGNORE INTO pending_referrals (telegram_id, referral_code, created_at, consumed_at)\n    VALUES (?, ?, ?, NULL)\n  `).bind(String(telegramId), referralCode, Date.now()).run();\n}\n\n"""
+          assert marker in s, 'bot webAppUrl marker not found'
+          s = s.replace(marker, helper + marker, 1)
+
+          old = """  if (text.startsWith('/start')) {\n    const referralCode = referralFromStart(text);\n    await telegramApi(env, 'sendMessage', {\n      chat_id: chatId,\n      text: referralCode\n        ? `${firstName}، دعوتت ثبت شد. وارد BlueTap شو و بازی را شروع کن.`\n        : `${firstName}، به BlueTap خوش آمدی.`,"""
+          new = """  if (text.startsWith('/start')) {\n    const referralCode = referralFromStart(text);\n    if (referralCode && message?.from?.id) {\n      await rememberReferral(env, message.from.id, referralCode);\n    }\n    await telegramApi(env, 'sendMessage', {\n      chat_id: chatId,\n      text: referralCode\n        ? `${firstName}، لینک دعوت شناسایی شد. برای تکمیل دعوت وارد BlueTap شو.`\n        : `${firstName}، به BlueTap خوش آمدی.`,"""
+          assert old in s, 'bot start block target not found'
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # Frontend: refresh referrals while the Friends tab is open and make share/copy reliable.
+          p = Path('apps/web/src/App.tsx')
+          s = p.read_text()
+
+          old = "useEffect(() => { load(); }, [load]);"
+          new = """useEffect(() => { load(); }, [load]);\n\n  useEffect(() => {\n    if (tab !== 'friends' || !telegramAccessAllowed) return;\n    void load();\n    const refresh = window.setInterval(() => void load(), 15_000);\n    const onVisible = () => { if (document.visibilityState === 'visible') void load(); };\n    document.addEventListener('visibilitychange', onVisible);\n    return () => {\n      window.clearInterval(refresh);\n      document.removeEventListener('visibilitychange', onVisible);\n    };\n  }, [tab, telegramAccessAllowed, load]);"""
+          assert old in s, 'App load effect target not found'
+          s = s.replace(old, new, 1)
+
+          old = """  const copyInvite = async () => {\n    if (!data?.inviteUrl) return;\n    await navigator.clipboard.writeText(data.inviteUrl);\n    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');\n  };"""
+          new = """  const copyInvite = async () => {\n    if (!data?.inviteUrl) return;\n    try {\n      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');\n      await navigator.clipboard.writeText(data.inviteUrl);\n    } catch {\n      const area = document.createElement('textarea');\n      area.value = data.inviteUrl;\n      area.setAttribute('readonly', '');\n      area.style.position = 'fixed';\n      area.style.opacity = '0';\n      document.body.appendChild(area);\n      area.select();\n      document.execCommand('copy');\n      area.remove();\n    }\n    setFlash('🔗 لینک دعوت کپی شد');\n    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');\n  };\n\n  const shareInvite = () => {\n    if (!data?.inviteUrl) return;\n    const text = 'با لینک من وارد BlueTap شو و ۱۰۰ امتیاز شروع بگیر.';\n    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(data.inviteUrl)}&text=${encodeURIComponent(text)}`;\n    if (window.Telegram?.WebApp?.openTelegramLink) window.Telegram.WebApp.openTelegramLink(shareUrl);\n    else window.open(shareUrl, '_blank', 'noopener,noreferrer');\n  };"""
+          assert old in s, 'copyInvite target not found'
+          s = s.replace(old, new, 1)
+
+          old = """        {tab === 'friends' && <section className=\"panel friends\"><div className=\"hero-icon\">👥</div><h2>دوستانت را دعوت کن</h2><p>برای هر دعوت موفق ۵۰۰ امتیاز می‌گیری و دوستت ۱۰۰ امتیاز شروع دریافت می‌کند.</p><div className=\"stat\"><span>دعوت‌های موفق</span><strong>{nf.format(profile.referrals)}</strong></div>{data.inviteUrl ? <><button className=\"primary\" onClick={copyInvite}>کپی لینک دعوت</button><code>{data.inviteUrl}</code></> : <p className=\"notice\">لینک دعوت فعلاً در دسترس نیست.</p>}</section>}"""
+          new = """        {tab === 'friends' && <section className=\"panel friends\"><div className=\"hero-icon\">👥</div><h2>دوستانت را دعوت کن</h2><p>برای هر دعوت موفق ۵۰۰ امتیاز می‌گیری و دوستت ۱۰۰ امتیاز شروع دریافت می‌کند.</p><div className=\"stat\"><span>دعوت‌های موفق</span><strong>{nf.format(profile.referrals)}</strong></div>{data.inviteUrl ? <><div className=\"friend-actions\"><button className=\"primary\" onClick={shareInvite}>دعوت در تلگرام</button><button className=\"secondary-action\" onClick={copyInvite}>کپی لینک</button></div><code>{data.inviteUrl}</code><small className=\"friends-refresh-note\">تعداد دعوت‌های موفق به‌صورت خودکار به‌روز می‌شود.</small></> : <p className=\"notice\">لینک دعوت فعلاً در دسترس نیست.</p>}</section>}"""
+          assert old in s, 'friends panel target not found'
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # Styles for the improved invite actions.
+          p = Path('apps/web/src/features.css')
+          s = p.read_text()
+          addition = """\n/* Referral UX */\n.friend-actions { display: grid; grid-template-columns: 1.35fr 1fr; gap: 8px; margin-top: 10px; }\n.friend-actions .primary, .secondary-action { min-height: 46px; border-radius: 13px; font-weight: 800; cursor: pointer; }\n.secondary-action { border: 1px solid #cfe3f7; background: #f3f8fe; color: #176fc1; padding: 12px; }\n.friend-actions button:active { transform: scale(.98); }\n.friends-refresh-note { display: block; margin-top: 9px; color: #8393a7; font-size: 10px; }\n@media (max-width: 360px) { .friend-actions { grid-template-columns: 1fr; } }\n"""
+          if '/* Referral UX */' not in s:
+              s += addition
+          p.write_text(s)
+          PY
+
+          cat > apps/api/migrations/0005_referral_reliability.sql <<'SQL'
+          CREATE TABLE IF NOT EXISTS pending_referrals (
+            telegram_id TEXT PRIMARY KEY,
+            referral_code TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            consumed_at INTEGER
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_pending_referrals_code
+            ON pending_referrals(referral_code, consumed_at);
+
+          -- If the invited account already exists but is still new and unassigned,
+          -- capture the referral immediately when Telegram sends /start ref_... .
+          CREATE TRIGGER IF NOT EXISTS trg_pending_referral_existing_user
+          AFTER INSERT ON pending_referrals
+          WHEN EXISTS (
+            SELECT 1
+            FROM users AS invitee
+            JOIN users AS inviter ON inviter.referral_code = NEW.referral_code
+            WHERE invitee.telegram_id = NEW.telegram_id
+              AND invitee.referred_by IS NULL
+              AND inviter.id <> invitee.id
+              AND NEW.created_at >= invitee.created_at
+              AND NEW.created_at - invitee.created_at <= 86400000
+          )
+          BEGIN
+            UPDATE users
+            SET referred_by = (SELECT id FROM users WHERE referral_code = NEW.referral_code LIMIT 1),
+                points = points + 100,
+                total_earned = total_earned + 100,
+                updated_at = NEW.created_at
+            WHERE telegram_id = NEW.telegram_id
+              AND referred_by IS NULL;
+
+            UPDATE users
+            SET points = points + 500,
+                total_earned = total_earned + 500,
+                updated_at = NEW.created_at
+            WHERE id = (SELECT referred_by FROM users WHERE telegram_id = NEW.telegram_id);
+
+            INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at)
+            SELECT id, 100, 'referral_join', '{"source":"telegram_start"}', NEW.created_at
+            FROM users WHERE telegram_id = NEW.telegram_id;
+
+            INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at)
+            SELECT referred_by, 500, 'referral_invite', '{"source":"telegram_start"}', NEW.created_at
+            FROM users WHERE telegram_id = NEW.telegram_id AND referred_by IS NOT NULL;
+
+            UPDATE pending_referrals
+            SET consumed_at = NEW.created_at
+            WHERE telegram_id = NEW.telegram_id;
+          END;
+
+          -- If /start arrived before the player ever opened BlueTap, consume the
+          -- saved referral atomically when their user row is first created.
+          CREATE TRIGGER IF NOT EXISTS trg_pending_referral_new_user
+          AFTER INSERT ON users
+          WHEN EXISTS (
+            SELECT 1
+            FROM pending_referrals AS pending
+            JOIN users AS inviter ON inviter.referral_code = pending.referral_code
+            WHERE pending.telegram_id = NEW.telegram_id
+              AND pending.consumed_at IS NULL
+              AND inviter.id <> NEW.id
+          )
+          BEGIN
+            UPDATE users
+            SET referred_by = (
+                  SELECT inviter.id
+                  FROM pending_referrals AS pending
+                  JOIN users AS inviter ON inviter.referral_code = pending.referral_code
+                  WHERE pending.telegram_id = NEW.telegram_id
+                    AND pending.consumed_at IS NULL
+                  LIMIT 1
+                ),
+                points = points + 100,
+                total_earned = total_earned + 100,
+                updated_at = NEW.updated_at
+            WHERE id = NEW.id
+              AND referred_by IS NULL;
+
+            UPDATE users
+            SET points = points + 500,
+                total_earned = total_earned + 500,
+                updated_at = NEW.updated_at
+            WHERE id = (SELECT referred_by FROM users WHERE id = NEW.id);
+
+            INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at)
+            SELECT NEW.id, 100, 'referral_join', '{"source":"telegram_pending"}', NEW.updated_at
+            WHERE (SELECT referred_by FROM users WHERE id = NEW.id) IS NOT NULL;
+
+            INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at)
+            SELECT referred_by, 500, 'referral_invite', '{"source":"telegram_pending"}', NEW.updated_at
+            FROM users WHERE id = NEW.id AND referred_by IS NOT NULL;
+
+            UPDATE pending_referrals
+            SET consumed_at = NEW.updated_at
+            WHERE telegram_id = NEW.telegram_id
+              AND consumed_at IS NULL;
+          END;
+          SQL
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply bluetap --remote --config apps/api/wrangler.toml
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy production Worker
+        run: npx wrangler deploy --config apps/api/wrangler.toml
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Commit hotfix and remove one-time workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/referral-debug-hotfix.yml
+          git add apps/api/src/bot.ts apps/api/migrations/0005_referral_reliability.sql apps/web/src/App.tsx apps/web/src/features.css .github/workflows/referral-debug-hotfix.yml
+          git commit -m 'Harden friend referral flow and live refresh'
+          git push origin HEAD:main
