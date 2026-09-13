@@ -13,6 +13,16 @@ function shortAddress(address: string) {
   return `${address.slice(0, 6)}…${address.slice(-6)}`;
 }
 
+function durationLabel(seconds: number) {
+  const safe = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  if (hours > 0) return `${nf.format(hours)} ساعت و ${nf.format(minutes)} دقیقه`;
+  if (minutes > 0) return `${nf.format(minutes)} دقیقه و ${nf.format(secs)} ثانیه`;
+  return `${nf.format(secs)} ثانیه`;
+}
+
 export default function App() {
   const [data, setData] = useState<Bootstrap | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -22,11 +32,13 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [floatingTaps, setFloatingTaps] = useState<FloatingTap[]>([]);
   const [clock, setClock] = useState(Date.now());
+  const [autoMineSessionConfirmed, setAutoMineSessionConfirmed] = useState(false);
   const pendingTaps = useRef(0);
   const flushTimer = useRef<number | null>(null);
   const flushing = useRef(false);
   const tapVisualId = useRef(0);
   const energyRef = useRef(0);
+  const autoMineSyncing = useRef(false);
   const wallet = useTonWallet();
 
   const telegramInitData = window.Telegram?.WebApp?.initData?.trim() || '';
@@ -89,6 +101,16 @@ export default function App() {
   const turboActive = Boolean(profile && profile.turboUntil > clock);
   const turboRemainingSeconds = profile && turboActive ? Math.max(0, Math.ceil((profile.turboUntil - clock) / 1000)) : 0;
   const tapReward = profile ? profile.tapPower * (turboActive ? profile.turboMultiplier : 1) : 1;
+  const autoMineExpired = Boolean(profile && clock >= profile.autoMineDeadlineAt);
+  const autoMineRemainingSeconds = profile && !autoMineExpired
+    ? Math.max(0, Math.ceil((profile.autoMineDeadlineAt - clock) / 1000))
+    : 0;
+  const autoMineLivePending = useMemo(() => {
+    if (!profile) return 0;
+    const end = Math.min(clock, profile.autoMineDeadlineAt);
+    const elapsed = Math.max(0, end - Math.min(profile.autoMineLastAt, end));
+    return Math.floor((elapsed * profile.autoMineRatePerMinute) / 60_000);
+  }, [clock, profile]);
 
   const addFloatingTap = useCallback((x: number, y: number, value = 1) => {
     const id = ++tapVisualId.current;
@@ -128,6 +150,50 @@ export default function App() {
     return () => window.clearInterval(id);
   }, []);
 
+  const confirmAutoMine = useCallback(async (manual = true) => {
+    if (autoMineSyncing.current) return;
+    autoMineSyncing.current = true;
+    if (manual) setBusy(true);
+    try {
+      const result = await api<{ awarded: number; burned: number; profile: Profile }>('/api/auto-mine/confirm', { method: 'POST' });
+      setProfile(result.profile);
+      setAutoMineSessionConfirmed(true);
+      setClock(Date.now());
+      if (result.burned > 0) {
+        setError(`${nf.format(result.burned)} BP ماین خودکار به‌دلیل عبور از مهلت ۵ ساعته سوخت. دوره جدید شروع شد.`);
+        window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('warning');
+      } else if (manual) {
+        window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+      }
+    } catch (e) {
+      if (manual) setError(e instanceof Error ? e.message : 'تأیید ماین خودکار انجام نشد');
+    } finally {
+      autoMineSyncing.current = false;
+      if (manual) setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!autoMineSessionConfirmed || !profile) return;
+
+    const syncIfActive = () => {
+      const now = Date.now();
+      if (now >= profile.autoMineDeadlineAt) {
+        setClock(now);
+        setAutoMineSessionConfirmed(false);
+        return;
+      }
+      if (document.visibilityState === 'visible') void confirmAutoMine(false);
+    };
+
+    const id = window.setInterval(syncIfActive, 30_000);
+    document.addEventListener('visibilitychange', syncIfActive);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', syncIfActive);
+    };
+  }, [autoMineSessionConfirmed, confirmAutoMine, profile?.autoMineDeadlineAt]);
+
   useEffect(() => {
     if (!wallet?.account.address || !profile || profile.walletAddress === wallet.account.address) return;
     api<{ profile: Profile }>('/api/wallet', { method: 'POST', body: JSON.stringify({ address: wallet.account.address }) })
@@ -165,6 +231,23 @@ export default function App() {
       window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
     } catch (e) { setError(e instanceof Error ? e.message : 'ارتقا انجام نشد'); }
     finally { setBusy(false); }
+  };
+
+  const upgradeAutoMine = async () => {
+    if (!profile?.autoMineUpgradeCost || busy) return;
+    setBusy(true);
+    try {
+      await flush();
+      const result = await api<{ profile: Profile; burned: number }>('/api/upgrades/auto-mine', { method: 'POST' });
+      setProfile(result.profile);
+      setAutoMineSessionConfirmed(true);
+      setClock(Date.now());
+      if (result.burned > 0) setError(`${nf.format(result.burned)} BP منقضی‌شده سوخت و ماین خودکار با سطح جدید شروع شد.`);
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'ارتقای ماین خودکار انجام نشد');
+      await load();
+    } finally { setBusy(false); }
   };
 
   const activateTurbo = async () => {
@@ -263,6 +346,29 @@ export default function App() {
             </div>
           </div>
 
+          <section className={`auto-mine-card${autoMineExpired ? ' expired' : autoMineSessionConfirmed ? ' active' : ''}`}>
+            <div className="auto-mine-head">
+              <div><span className="auto-mine-icon">🤖</span><b>ماین خودکار</b></div>
+              <span>Lv.{nf.format(profile.autoMineLevel)}</span>
+            </div>
+            <div className="auto-mine-stats">
+              <div><small>سرعت</small><strong>+{nf.format(profile.autoMineRatePerMinute)} BP/دقیقه</strong></div>
+              <div><small>{autoMineExpired ? 'در معرض سوختن' : 'استخراج معلق'}</small><strong>{nf.format(autoMineLivePending)} BP</strong></div>
+            </div>
+            <div className="auto-mine-deadline">
+              {autoMineExpired ? (
+                <span>مهلت ۵ ساعته تمام شده؛ امتیاز معلق با تأیید می‌سوزد و دوره جدید شروع می‌شود.</span>
+              ) : (
+                <span>مهلت تأیید: {durationLabel(autoMineRemainingSeconds)} دیگر</span>
+              )}
+              <small>تا وقتی داخل بازی و تأییدشده باشی، استخراج خودکار هر ۳۰ ثانیه تسویه می‌شود.</small>
+            </div>
+            <button disabled={busy} onClick={() => void confirmAutoMine(true)}>
+              {autoMineExpired ? 'تأیید و شروع دوره جدید' : autoMineSessionConfirmed ? 'تأیید الآن' : 'تأیید ماین خودکار'}
+            </button>
+            {profile.autoMineBurnedTotal > 0 && <small className="burned-total">مجموع سوخته: {nf.format(profile.autoMineBurnedTotal)} BP</small>}
+          </section>
+
           <div className="quick-grid">
             <button className="quick-card" onClick={() => setTab('boost')}>
               <span>🚀</span><b>ارتقا و توربو</b><small>قدرت فعلی +{nf.format(profile.tapPower)}</small>
@@ -293,6 +399,22 @@ export default function App() {
             </div>
           </article>
 
+          <article className="upgrade-card auto-upgrade-card">
+            <div className="upgrade-icon">🤖</div>
+            <div className="upgrade-copy">
+              <b>سرعت ماین خودکار</b>
+              <strong>+{nf.format(profile.autoMineRatePerMinute)} <small>BP در دقیقه · Lv.{nf.format(profile.autoMineLevel)}</small></strong>
+              <p>داخل و خارج بازی کار می‌کند. برای حفظ خروجی آفلاین باید حداکثر هر ۵ ساعت وارد بازی شوی و ماین خودکار را تأیید کنی.</p>
+            </div>
+            {profile.autoMineUpgradeCost === null ? (
+              <button disabled>بیشترین سطح</button>
+            ) : (
+              <button disabled={busy || profile.points < profile.autoMineUpgradeCost} onClick={upgradeAutoMine}>
+                ارتقا به Lv.{nf.format(profile.autoMineLevel + 1)} · {nf.format(profile.autoMineUpgradeCost)} BP
+              </button>
+            )}
+          </article>
+
           <article className="upgrade-card">
             <div className="upgrade-icon">👆</div>
             <div className="upgrade-copy">
@@ -321,7 +443,7 @@ export default function App() {
             </button>
           </article>
 
-          <p className="upgrade-note">هزینه ارتقا از موجودی Blue Points کم می‌شود، اما «کل استخراج»، سطح و رتبه تاریخی شما کم نمی‌شود.</p>
+          <p className="upgrade-note">ماین خودکار، کلیک و مأموریت‌ها Blue Points فصل را می‌سازند. BPهای ماین خودکار تا زمان تأیید معلق‌اند و پس از پایان مهلت ۵ ساعته از بین می‌روند.</p>
         </section>}
 
         {tab === 'tasks' && <section className="panel">
