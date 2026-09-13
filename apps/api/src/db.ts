@@ -1,7 +1,11 @@
 import {
+  AUTO_MINE_CONFIRM_WINDOW_SECONDS,
+  autoMineState,
+  autoMineUpgradeCost,
   effectiveEnergy,
   getLevel,
   isTurboActive,
+  MAX_AUTO_MINE_LEVEL,
   MAX_TAP_POWER,
   TASKS,
   tapPowerLevel,
@@ -36,9 +40,13 @@ export async function ensureUser(env: Env, auth: TelegramAuth) {
 
   const now = Date.now();
   await env.DB.prepare(`
-    INSERT INTO users (telegram_id, username, first_name, referral_code, last_energy_at, tap_bucket_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(auth.id, auth.username || null, auth.firstName, referralCode(auth.id), now, now, now, now).run();
+    INSERT INTO users (
+      telegram_id, username, first_name, referral_code,
+      last_energy_at, tap_bucket_at, auto_mine_last_at, auto_mine_confirmed_at,
+      created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(auth.id, auth.username || null, auth.firstName, referralCode(auth.id), now, now, now, now, now, now).run();
 
   const user = (await getUserByTelegramId(env, auth.id))!;
   if (auth.startParam?.startsWith('ref_')) await applyReferral(env, user, auth.startParam.slice(4));
@@ -88,6 +96,7 @@ export async function profileView(env: Env, user: UserRow) {
   const level = getLevel(totalEarned);
   const powerLevel = tapPowerLevel(user);
   const turboActive = isTurboActive(user, now);
+  const autoMine = autoMineState(user, now);
   return {
     id: user.telegram_id,
     firstName: user.first_name,
@@ -110,6 +119,18 @@ export async function profileView(env: Env, user: UserRow) {
     turboUntil: Number(user.turbo_until || 0),
     turboRemainingSeconds: turboActive ? Math.max(0, Math.ceil((Number(user.turbo_until) - now) / 1000)) : 0,
     turboCost: turboCost(user),
+    autoMineLevel: autoMine.level,
+    autoMineRatePerMinute: autoMine.ratePerMinute,
+    autoMineUpgradeCost: autoMineUpgradeCost(autoMine.level),
+    maxAutoMineLevel: MAX_AUTO_MINE_LEVEL,
+    autoMineLastAt: autoMine.lastAt,
+    autoMineConfirmedAt: autoMine.confirmedAt,
+    autoMineDeadlineAt: autoMine.deadlineAt,
+    autoMinePending: autoMine.pending,
+    autoMineExpired: autoMine.expired,
+    autoMineRemainingSeconds: autoMine.remainingSeconds,
+    autoMineConfirmWindowSeconds: AUTO_MINE_CONFIRM_WINDOW_SECONDS,
+    autoMineBurnedTotal: autoMine.burnedTotal,
     ...level,
   };
 }
