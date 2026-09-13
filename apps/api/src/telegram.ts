@@ -2,8 +2,13 @@ import type { Env, TelegramAuth } from './types';
 
 const encoder = new TextEncoder();
 
+function toArrayBuffer(value: Uint8Array | ArrayBuffer): ArrayBuffer {
+  if (value instanceof ArrayBuffer) return value;
+  return value.slice().buffer as ArrayBuffer;
+}
+
 async function hmac(key: ArrayBuffer | Uint8Array | string, message: string): Promise<ArrayBuffer> {
-  const rawKey = typeof key === 'string' ? encoder.encode(key) : key;
+  const rawKey = typeof key === 'string' ? toArrayBuffer(encoder.encode(key)) : toArrayBuffer(key);
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
     rawKey,
@@ -11,7 +16,7 @@ async function hmac(key: ArrayBuffer | Uint8Array | string, message: string): Pr
     false,
     ['sign'],
   );
-  return crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message));
+  return crypto.subtle.sign('HMAC', cryptoKey, toArrayBuffer(encoder.encode(message)));
 }
 
 function toHex(buffer: ArrayBuffer): string {
