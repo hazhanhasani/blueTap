@@ -18,9 +18,12 @@ button { -webkit-tap-highlight-color: transparent; }
 .balance-card small { color: #8797ab; }
 .level-track, .energy-track, .task-track { height: 7px; border-radius: 999px; background: #e8f1fb; overflow: hidden; }
 .level-track i, .energy-track i, .task-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #1aa4ff, #2867df); transition: width .25s ease; }
+.turbo-banner { border: 1px solid #ffd77e; background: linear-gradient(90deg, #fff8d6, #fff0ae); color: #8a5a00; border-radius: 16px; padding: 10px 14px; text-align: center; font-size: 12px; font-weight: 800; box-shadow: 0 10px 26px #dca3001c; }
 .coin-stage { position: relative; width: 220px; height: 220px; margin: 16px auto 2px; isolation: isolate; }
 .coin { position: relative; z-index: 1; width: 100%; height: 100%; border-radius: 50%; border: 0; margin: 0; display: grid; place-items: center; cursor: pointer; background: radial-gradient(circle at 38% 30%, #7ed9ff, #168de9 45%, #074eae 72%, #042f73); box-shadow: 0 24px 50px #067bdc4a, inset 0 0 0 9px #ffffff24, inset 0 0 0 13px #082f7b70; transition: transform .08s ease; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .coin:active { transform: scale(.95); }
+.coin-stage.turbo-on::before { content: ''; position: absolute; inset: -16px; border-radius: 50%; background: radial-gradient(circle, #ffd54a33 40%, #ffb30018 62%, transparent 72%); animation: turboPulse 1s ease-in-out infinite; }
+.coin-stage.turbo-on .coin { box-shadow: 0 0 0 8px #ffd45022, 0 24px 54px #ffae0055, inset 0 0 0 9px #ffffff24, inset 0 0 0 13px #082f7b70; }
 .coin-ring { width: 166px; height: 166px; border: 2px solid #bfeaffaa; border-radius: 50%; display: grid; place-items: center; align-content: center; color: #fff; box-shadow: inset 0 0 30px #bcecff45; pointer-events: none; }
 .coin-ring b { font-size: 88px; line-height: .8; font-family: Arial Black, sans-serif; text-shadow: 0 7px 14px #003d8e80; }
 .coin-ring small { margin-top: 12px; font-size: 12px; letter-spacing: 3px; font-weight: 800; }
@@ -42,6 +45,21 @@ button { -webkit-tap-highlight-color: transparent; }
 .leader { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid #eef3f8; font-size: 12px; }
 .rank { width: 25px; height: 25px; border-radius: 9px; display: grid; place-items: center; background: #eaf5ff; color: #1575ce; font-weight: 800; }
 .leader strong { color: #1575ce; }
+.boost-panel { display: grid; gap: 12px; }
+.upgrade-card { border: 1px solid #dcecff; background: linear-gradient(180deg, #fbfdff, #f3f9ff); border-radius: 20px; padding: 15px; display: grid; grid-template-columns: 54px 1fr; gap: 12px; align-items: start; }
+.upgrade-icon { width: 54px; height: 54px; border-radius: 17px; display: grid; place-items: center; background: #e5f3ff; font-size: 28px; }
+.upgrade-copy b, .upgrade-copy strong { display: block; }
+.upgrade-copy b { font-size: 13px; }
+.upgrade-copy strong { margin-top: 2px; font-size: 22px; color: #126fc5; }
+.upgrade-copy strong small { font-size: 10px; color: #7c8ca0; }
+.upgrade-copy p { margin: 5px 0 0; font-size: 11px; line-height: 1.8; color: #71839a; }
+.upgrade-card > button { grid-column: 1 / -1; border: 0; border-radius: 14px; padding: 11px 13px; background: #147edb; color: #fff; font-weight: 800; cursor: pointer; }
+.upgrade-card > button:disabled { background: #e7eef6; color: #93a2b2; cursor: default; }
+.turbo-card { background: linear-gradient(180deg, #fffdf4, #fff8de); border-color: #ffe29a; }
+.turbo-card .upgrade-icon { background: #fff0b9; }
+.turbo-card .upgrade-copy strong { color: #b36a00; }
+.turbo-card.active { box-shadow: 0 0 0 2px #ffc83d33, 0 14px 30px #dca3001f; }
+.upgrade-note { margin: 0 !important; padding: 12px; border-radius: 14px; background: #eef8ff; color: #56738f !important; font-size: 11px !important; }
 .task { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 14px 0; border-top: 1px solid #eef3f8; }
 .task:first-of-type { border-top: 0; }
 .task-copy b, .task-copy small, .task-copy em { display: block; }
@@ -64,8 +82,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .token-box { text-align: right; }
 .token-box b { color: #147edb; }
 .claim-locked { width: 100%; border: 0; padding: 13px; border-radius: 14px; background: #e9eff6; color: #8798aa; font-weight: 800; }
-.bottom-nav { position: fixed; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(calc(100% - 24px), 496px); display: grid; grid-template-columns: repeat(4, 1fr); padding: 7px; background: #ffffffee; backdrop-filter: blur(16px); border: 1px solid #dcecff; border-radius: 22px; box-shadow: 0 18px 50px #234f7d2e; z-index: 10; }
-.bottom-nav button { border: 0; background: transparent; color: #8192a6; border-radius: 16px; padding: 7px 3px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.bottom-nav { position: fixed; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(calc(100% - 24px), 496px); display: grid; grid-template-columns: repeat(5, 1fr); padding: 7px; background: #ffffffee; backdrop-filter: blur(16px); border: 1px solid #dcecff; border-radius: 22px; box-shadow: 0 18px 50px #234f7d2e; z-index: 10; }
+.bottom-nav button { border: 0; background: transparent; color: #8192a6; border-radius: 16px; padding: 7px 2px; font-size: 9px; font-weight: 700; cursor: pointer; }
 .bottom-nav button span { display: block; font-size: 18px; line-height: 1.1; }
 .bottom-nav button.active { background: #e9f5ff; color: #147edb; }
 .error-banner { width: 100%; border: 1px solid #ffd5d5; background: #fff0f0; color: #a64040; padding: 10px; border-radius: 13px; margin-bottom: 10px; }
@@ -79,4 +97,8 @@ button { -webkit-tap-highlight-color: transparent; }
   58% { opacity: 1; transform: translate(-50%, -105%) scale(1); }
   100% { opacity: 0; transform: translate(-50%, -165%) scale(1.16); }
 }
-@media (max-width: 380px) { .coin-stage { width: 190px; height: 190px; } .coin-ring { width: 145px; height: 145px; } .coin-ring b { font-size: 72px; } }
+@keyframes turboPulse {
+  0%, 100% { transform: scale(.96); opacity: .65; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+@media (max-width: 380px) { .coin-stage { width: 190px; height: 190px; } .coin-ring { width: 145px; height: 145px; } .coin-ring b { font-size: 72px; } .bottom-nav button { font-size: 8px; } }
