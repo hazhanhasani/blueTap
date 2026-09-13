@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { authenticateRequest } from './telegram';
+import { handleTelegramUpdate } from './bot';
 import { DAILY_REWARD, effectiveEnergy, effectiveTapBucket, MAX_TAPS_PER_REQUEST, TASKS, utcDay } from './game';
 import { ensureUser, getUserByTelegramId, leaderboard, profileView, taskView } from './db';
 import type { Env, TelegramAuth, UserRow } from './types';
@@ -10,7 +11,27 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type', 'X-Dev-Telegram-Id', 'X-Dev-First-Name'] }));
 
-app.get('/health', (c) => c.json({ ok: true, service: 'BlueTap API' }));
+app.get('/health', (c) => c.json({
+  ok: true,
+  service: 'BlueTap API',
+  telegramBotConfigured: Boolean(c.env.TELEGRAM_BOT_TOKEN),
+  telegramWebhookSecretConfigured: Boolean(c.env.TELEGRAM_WEBHOOK_SECRET),
+}));
+
+app.post('/telegram/webhook', async (c) => {
+  const expectedSecret = c.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!expectedSecret) return c.json({ error: 'Telegram webhook secret is not configured' }, 503);
+
+  const receivedSecret = c.req.header('X-Telegram-Bot-Api-Secret-Token') || '';
+  if (receivedSecret !== expectedSecret) return c.json({ error: 'Invalid webhook secret' }, 401);
+
+  const update = await c.req.json().catch(() => null);
+  if (!update) return c.json({ ok: true });
+
+  const appUrl = new URL(c.req.url).origin;
+  await handleTelegramUpdate(update, c.env, appUrl);
+  return c.json({ ok: true });
+});
 
 app.use('/api/*', async (c, next) => {
   try {
