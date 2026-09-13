@@ -1,0 +1,258 @@
+name: BlueTap Referral Hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/referral-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fix referral attribution flow
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f'Missing patch target: {label} in {path}')
+              p.write_text(text.replace(old, new, 1))
+
+          # 1) Use a reliable bot deep-link and allow referral fallback header.
+          replace_once(
+              'apps/api/src/index.ts',
+              "app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type', 'X-Dev-Telegram-Id', 'X-Dev-First-Name'] }));",
+              "app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type', 'X-Dev-Telegram-Id', 'X-Dev-First-Name', 'X-Referral-Code'] }));",
+              'CORS referral header',
+          )
+          replace_once(
+              'apps/api/src/index.ts',
+              "  const inviteUrl = c.env.BOT_USERNAME ? `https://t.me/${c.env.BOT_USERNAME}?startapp=ref_${user.referral_code}` : null;",
+              "  const inviteUrl = c.env.BOT_USERNAME ? `https://t.me/${c.env.BOT_USERNAME}?start=ref_${user.referral_code}` : null;",
+              'invite deep link',
+          )
+
+          # 2) Preserve the /start referral payload in the web_app button URL.
+          bot = Path('apps/api/src/bot.ts')
+          bot.write_text("""import type { Env } from './types';
+
+type TelegramMessage = {
+  chat?: { id?: number | string };
+  text?: string;
+  from?: { first_name?: string };
+};
+
+type TelegramUpdate = {
+  message?: TelegramMessage;
+};
+
+async function telegramApi(env: Env, method: string, body: unknown): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN is not configured');
+
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Telegram API ${method} failed: ${response.status} ${text}`);
+  }
+}
+
+function referralFromStart(text: string): string | null {
+  const match = text.match(/^\\/start(?:@\\w+)?(?:\\s+ref_([a-z0-9]+))?$/i);
+  const code = match?.[1]?.trim() || '';
+  return /^bt[a-z0-9]+$/i.test(code) ? code : null;
+}
+
+function webAppUrl(appUrl: string, referralCode: string | null): string {
+  const url = new URL(appUrl);
+  if (referralCode) url.searchParams.set('ref', referralCode);
+  return url.toString();
+}
+
+export async function handleTelegramUpdate(update: TelegramUpdate, env: Env, appUrl: string): Promise<void> {
+  const message = update.message;
+  const chatId = message?.chat?.id;
+  if (!chatId) return;
+
+  const firstName = message?.from?.first_name?.trim() || 'بازیکن';
+  const text = message?.text?.trim() || '';
+
+  if (text.startsWith('/start')) {
+    const referralCode = referralFromStart(text);
+    await telegramApi(env, 'sendMessage', {
+      chat_id: chatId,
+      text: referralCode
+        ? `${firstName}، دعوتت ثبت شد. وارد BlueTap شو و بازی را شروع کن.`
+        : `${firstName}، به BlueTap خوش آمدی.`,
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '🚀 ورود به BlueTap', web_app: { url: webAppUrl(appUrl, referralCode) } },
+        ]],
+      },
+    });
+    return;
+  }
+
+  await telegramApi(env, 'sendMessage', {
+    chat_id: chatId,
+    text: 'برای بازی وارد BlueTap شو.',
+    reply_markup: {
+      inline_keyboard: [[
+        { text: '🚀 ورود به BlueTap', web_app: { url: webAppUrl(appUrl, null) } },
+      ]],
+    },
+  });
+}
+""")
+
+          # 3) Forward the referral code from the WebApp URL to the authenticated API request.
+          api = Path('apps/web/src/api.ts')
+          api.write_text("""const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\\/$/, '');
+
+function referralCodeFromPage(): string {
+  const fromUrl = new URLSearchParams(window.location.search).get('ref')?.trim() || '';
+  if (/^bt[a-z0-9]+$/i.test(fromUrl)) {
+    try { window.sessionStorage.setItem('bluetap_referral', fromUrl); } catch {}
+    return fromUrl;
+  }
+  try {
+    const saved = window.sessionStorage.getItem('bluetap_referral')?.trim() || '';
+    return /^bt[a-z0-9]+$/i.test(saved) ? saved : '';
+  } catch {
+    return '';
+  }
+}
+
+function headers() {
+  const result: Record<string, string> = { 'Content-Type': 'application/json' };
+  const initData = window.Telegram?.WebApp?.initData;
+  if (initData) result.Authorization = `tma ${initData}`;
+  else if (import.meta.env.VITE_DEV_TELEGRAM_ID) {
+    result['X-Dev-Telegram-Id'] = import.meta.env.VITE_DEV_TELEGRAM_ID;
+    result['X-Dev-First-Name'] = 'BlueTap Dev';
+  }
+  const referralCode = referralCodeFromPage();
+  if (referralCode) result['X-Referral-Code'] = referralCode;
+  return result;
+}
+
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
+  const data = await response.json() as any;
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data as T;
+}
+""")
+
+          # 4) Keep Telegram's signed start_param first, but accept the referral fallback
+          # only after Telegram authentication has succeeded.
+          replace_once(
+              'apps/api/src/telegram.ts',
+              "    return validateTelegramInitData(auth.slice(4), env.TELEGRAM_BOT_TOKEN, maxAge);",
+              "    const telegramAuth = await validateTelegramInitData(auth.slice(4), env.TELEGRAM_BOT_TOKEN, maxAge);\n    const fallbackReferral = request.headers.get('X-Referral-Code')?.trim() || '';\n    if (!telegramAuth.startParam && /^bt[a-z0-9]+$/i.test(fallbackReferral)) telegramAuth.startParam = `ref_${fallbackReferral}`;\n    return telegramAuth;",
+              'authenticated referral fallback',
+          )
+
+          # 5) Recover attribution for a freshly-created account whose first request lost
+          # the Telegram referral payload, and make inviter rewards idempotent.
+          db = Path('apps/api/src/db.ts')
+          text = db.read_text()
+          old_existing = """  const existing = await getUserByTelegramId(env, auth.id);
+  if (existing) {
+    await env.DB.prepare('UPDATE users SET username = ?, first_name = ?, updated_at = ? WHERE id = ?')
+      .bind(auth.username || null, auth.firstName, Date.now(), existing.id)
+      .run();
+    const fresh = (await getUserByTelegramId(env, auth.id))!;
+    return { user: await normalizeActivityCounters(env, fresh), created: false };
+  }
+"""
+          new_existing = """  const existing = await getUserByTelegramId(env, auth.id);
+  if (existing) {
+    const now = Date.now();
+    const referralCode = auth.startParam?.startsWith('ref_') ? auth.startParam.slice(4) : '';
+    const accountAge = now - Number(existing.created_at || 0);
+    if (!existing.referred_by && referralCode && accountAge >= 0 && accountAge <= 24 * 60 * 60 * 1000) {
+      await applyReferral(env, existing, referralCode);
+    }
+    await env.DB.prepare('UPDATE users SET username = ?, first_name = ?, updated_at = ? WHERE id = ?')
+      .bind(auth.username || null, auth.firstName, now, existing.id)
+      .run();
+    const fresh = (await getUserByTelegramId(env, auth.id))!;
+    return { user: await normalizeActivityCounters(env, fresh), created: false };
+  }
+"""
+          if old_existing not in text:
+              raise SystemExit('Missing ensureUser existing-user target')
+          text = text.replace(old_existing, new_existing, 1)
+
+          old_apply = """async function applyReferral(env: Env, user: UserRow, code: string) {
+  if (user.referred_by) return;
+  const inviter = await env.DB.prepare('SELECT * FROM users WHERE referral_code = ?').bind(code).first<UserRow>();
+  if (!inviter || inviter.id === user.id) return;
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE users SET referred_by = ?, points = points + 100, total_earned = total_earned + 100, updated_at = ? WHERE id = ? AND referred_by IS NULL').bind(inviter.id, now, user.id),
+    env.DB.prepare('UPDATE users SET points = points + 500, total_earned = total_earned + 500, updated_at = ? WHERE id = ?').bind(now, inviter.id),
+    env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, 100, ?, ?, ?)').bind(user.id, 'referral_join', JSON.stringify({ inviter: inviter.id }), now),
+    env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, 500, ?, ?, ?)').bind(inviter.id, 'referral_invite', JSON.stringify({ referred: user.id }), now),
+  ]);
+}
+"""
+          new_apply = """async function applyReferral(env: Env, user: UserRow, code: string) {
+  if (user.referred_by || !/^bt[a-z0-9]+$/i.test(code)) return;
+  const inviter = await env.DB.prepare('SELECT * FROM users WHERE referral_code = ?').bind(code).first<UserRow>();
+  if (!inviter || inviter.id === user.id) return;
+  const now = Date.now();
+  const linked = await env.DB.prepare(`
+    UPDATE users
+    SET referred_by = ?, points = points + 100, total_earned = total_earned + 100, updated_at = ?
+    WHERE id = ? AND referred_by IS NULL
+  `).bind(inviter.id, now, user.id).run();
+  if (!linked.meta.changes) return;
+  await env.DB.batch([
+    env.DB.prepare('UPDATE users SET points = points + 500, total_earned = total_earned + 500, updated_at = ? WHERE id = ?').bind(now, inviter.id),
+    env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, 100, ?, ?, ?)').bind(user.id, 'referral_join', JSON.stringify({ inviter: inviter.id }), now),
+    env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, 500, ?, ?, ?)').bind(inviter.id, 'referral_invite', JSON.stringify({ referred: user.id }), now),
+  ]);
+}
+"""
+          if old_apply not in text:
+              raise SystemExit('Missing applyReferral target')
+          db.write_text(text.replace(old_apply, new_apply, 1))
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Commit hotfix and remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/referral-hotfix.yml
+          git add apps/api/src/index.ts apps/api/src/bot.ts apps/api/src/telegram.ts apps/api/src/db.ts apps/web/src/api.ts
+          git commit -m "Fix referral attribution and invite flow"
+          git push origin HEAD:main
