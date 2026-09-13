@@ -14,3 +14,9 @@ binding = "DB"
 database_name = "bluetap"
 database_id = "fe5b6d30-7f97-404a-a846-7f2a9657715e"
 migrations_dir = "migrations"
+
+[assets]
+directory = "../web/dist"
+not_found_handling = "single-page-application"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/health"]
