@@ -72,7 +72,12 @@ export async function authenticateRequest(request: Request, env: Env): Promise<T
   if (auth.startsWith('tma ')) {
     if (!env.TELEGRAM_BOT_TOKEN) throw new Error('Telegram bot token is not configured');
     const maxAge = Math.max(60, Number(env.AUTH_MAX_AGE_SECONDS || 86400));
-    return validateTelegramInitData(auth.slice(4), env.TELEGRAM_BOT_TOKEN, maxAge);
+    const telegramAuth = await validateTelegramInitData(auth.slice(4), env.TELEGRAM_BOT_TOKEN, maxAge);
+    const fallbackReferral = request.headers.get('X-Referral-Code')?.trim() || '';
+    if (!telegramAuth.startParam && /^bt[a-z0-9]+$/i.test(fallbackReferral)) {
+      telegramAuth.startParam = `ref_${fallbackReferral}`;
+    }
+    return telegramAuth;
   }
 
   if (env.ALLOW_DEV_AUTH === 'true') {
