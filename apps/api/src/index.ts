@@ -2,7 +2,20 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { authenticateRequest } from './telegram';
 import { handleTelegramUpdate } from './bot';
-import { DAILY_REWARD, effectiveEnergy, effectiveTapBucket, MAX_TAPS_PER_REQUEST, TASKS, utcDay } from './game';
+import {
+  DAILY_REWARD,
+  effectiveEnergy,
+  effectiveTapBucket,
+  isTurboActive,
+  MAX_TAPS_PER_REQUEST,
+  TASKS,
+  tapPowerLevel,
+  tapPowerUpgradeCost,
+  tapRewardPerTap,
+  TURBO_DURATION_SECONDS,
+  turboCost,
+  utcDay,
+} from './game';
 import { ensureUser, getUserByTelegramId, leaderboard, profileView, taskView } from './db';
 import type { Env, TelegramAuth, UserRow } from './types';
 
@@ -74,21 +87,70 @@ app.post('/api/tap', async (c) => {
   const now = Date.now();
   const energy = effectiveEnergy(user, now);
   const bucket = effectiveTapBucket(user, now);
-  const awarded = Math.max(0, Math.min(requested, Math.floor(bucket), energy));
-  const nextBucket = Math.max(0, bucket - awarded);
+  const awardedTaps = Math.max(0, Math.min(requested, Math.floor(bucket), energy));
+  const tapValue = tapRewardPerTap(user, now);
+  const awarded = awardedTaps * tapValue;
+  const nextBucket = Math.max(0, bucket - awardedTaps);
 
   await c.env.DB.batch([
     c.env.DB.prepare(`
       UPDATE users
-      SET points = points + ?, taps = taps + ?, energy = ?, last_energy_at = ?, tap_bucket = ?, tap_bucket_at = ?, updated_at = ?
+      SET points = points + ?, total_earned = total_earned + ?, taps = taps + ?, energy = ?, last_energy_at = ?, tap_bucket = ?, tap_bucket_at = ?, updated_at = ?
       WHERE id = ?
-    `).bind(awarded, awarded, energy - awarded, now, nextBucket, now, now, user.id),
+    `).bind(awarded, awarded, awardedTaps, energy - awardedTaps, now, nextBucket, now, now, user.id),
     c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)')
-      .bind(user.id, awarded, 'tap', JSON.stringify({ requested }), now),
+      .bind(user.id, awarded, 'tap', JSON.stringify({ requested, awardedTaps, tapValue, turbo: isTurboActive(user, now) }), now),
   ]);
 
   const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
-  return c.json({ awarded, profile: await profileView(c.env, fresh) });
+  return c.json({ awarded, awardedTaps, tapValue, profile: await profileView(c.env, fresh) });
+});
+
+app.post('/api/upgrades/tap-power', async (c) => {
+  const user = await currentUser(c);
+  const level = tapPowerLevel(user);
+  const cost = tapPowerUpgradeCost(level);
+  if (cost === null) return c.json({ error: 'Maximum tap power reached' }, 409);
+  if (user.points < cost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
+
+  const now = Date.now();
+  const result = await c.env.DB.prepare(`
+    UPDATE users
+    SET points = points - ?, tap_power_level = tap_power_level + 1, updated_at = ?
+    WHERE id = ? AND points >= ? AND tap_power_level = ?
+  `).bind(cost, now, user.id, cost, level).run();
+
+  if (!result.meta.changes) return c.json({ error: 'ارتقا انجام نشد؛ دوباره تلاش کن' }, 409);
+  await c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(user.id, -cost, 'upgrade_tap_power', JSON.stringify({ from: level, to: level + 1 }), now)
+    .run();
+
+  const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
+  return c.json({ cost, profile: await profileView(c.env, fresh) });
+});
+
+app.post('/api/upgrades/turbo', async (c) => {
+  const user = await currentUser(c);
+  const now = Date.now();
+  if (isTurboActive(user, now)) return c.json({ error: 'توربو همین حالا فعال است' }, 409);
+
+  const cost = turboCost(user);
+  if (user.points < cost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
+  const turboUntil = now + TURBO_DURATION_SECONDS * 1000;
+
+  const result = await c.env.DB.prepare(`
+    UPDATE users
+    SET points = points - ?, turbo_until = ?, updated_at = ?
+    WHERE id = ? AND points >= ? AND turbo_until <= ?
+  `).bind(cost, turboUntil, now, user.id, cost, now).run();
+
+  if (!result.meta.changes) return c.json({ error: 'فعال‌سازی توربو انجام نشد؛ دوباره تلاش کن' }, 409);
+  await c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(user.id, -cost, 'turbo', JSON.stringify({ durationSeconds: TURBO_DURATION_SECONDS, turboUntil }), now)
+    .run();
+
+  const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
+  return c.json({ cost, profile: await profileView(c.env, fresh) });
 });
 
 app.post('/api/daily', async (c) => {
@@ -97,7 +159,7 @@ app.post('/api/daily', async (c) => {
   if (user.last_daily_day === day) return c.json({ error: 'Daily reward already claimed' }, 409);
   const now = Date.now();
   await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE users SET points = points + ?, last_daily_day = ?, updated_at = ? WHERE id = ?').bind(DAILY_REWARD, day, now, user.id),
+    c.env.DB.prepare('UPDATE users SET points = points + ?, total_earned = total_earned + ?, last_daily_day = ?, updated_at = ? WHERE id = ?').bind(DAILY_REWARD, DAILY_REWARD, day, now, user.id),
     c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, created_at) VALUES (?, ?, ?, ?)').bind(user.id, DAILY_REWARD, 'daily', now),
   ]);
   const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
@@ -132,7 +194,7 @@ app.post('/api/tasks/:taskId/claim', async (c) => {
     .run();
   if (!inserted.meta.changes) return c.json({ error: 'Task already claimed' }, 409);
   await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE users SET points = points + ?, updated_at = ? WHERE id = ?').bind(task.reward, now, user.id),
+    c.env.DB.prepare('UPDATE users SET points = points + ?, total_earned = total_earned + ?, updated_at = ? WHERE id = ?').bind(task.reward, task.reward, now, user.id),
     c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)')
       .bind(user.id, task.reward, 'task', JSON.stringify({ taskId }), now),
   ]);
