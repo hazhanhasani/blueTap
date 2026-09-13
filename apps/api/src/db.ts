@@ -1,4 +1,16 @@
-import { effectiveEnergy, getLevel, TASKS, utcDay } from './game';
+import {
+  effectiveEnergy,
+  getLevel,
+  isTurboActive,
+  MAX_TAP_POWER,
+  TASKS,
+  tapPowerLevel,
+  tapPowerUpgradeCost,
+  TURBO_DURATION_SECONDS,
+  TURBO_MULTIPLIER,
+  turboCost,
+  utcDay,
+} from './game';
 import type { Env, TelegramAuth, UserRow } from './types';
 
 function referralCode(telegramId: string) {
@@ -40,8 +52,8 @@ async function applyReferral(env: Env, user: UserRow, code: string) {
 
   const now = Date.now();
   await env.DB.batch([
-    env.DB.prepare('UPDATE users SET referred_by = ?, points = points + 100, updated_at = ? WHERE id = ? AND referred_by IS NULL').bind(inviter.id, now, user.id),
-    env.DB.prepare('UPDATE users SET points = points + 500, updated_at = ? WHERE id = ?').bind(now, inviter.id),
+    env.DB.prepare('UPDATE users SET referred_by = ?, points = points + 100, total_earned = total_earned + 100, updated_at = ? WHERE id = ? AND referred_by IS NULL').bind(inviter.id, now, user.id),
+    env.DB.prepare('UPDATE users SET points = points + 500, total_earned = total_earned + 500, updated_at = ? WHERE id = ?').bind(now, inviter.id),
     env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, 100, ?, ?, ?)').bind(user.id, 'referral_join', JSON.stringify({ inviter: inviter.id }), now),
     env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, 500, ?, ?, ?)').bind(inviter.id, 'referral_invite', JSON.stringify({ referred: user.id }), now),
   ]);
@@ -64,7 +76,7 @@ export async function taskView(env: Env, user: UserRow) {
     if (task.metric === 'taps') progress = user.taps;
     if (task.metric === 'wallet') progress = user.wallet_address ? 1 : 0;
     if (task.metric === 'referrals') progress = refs;
-    if (task.metric === 'points') progress = user.points;
+    if (task.metric === 'points') progress = user.total_earned;
     return { ...task, progress: Math.min(progress, task.target), completed: progress >= task.target, claimed: claimed.has(task.id) };
   });
 }
@@ -72,12 +84,16 @@ export async function taskView(env: Env, user: UserRow) {
 export async function profileView(env: Env, user: UserRow) {
   const now = Date.now();
   const refs = await referralCount(env, user.id);
-  const level = getLevel(user.points);
+  const totalEarned = Number(user.total_earned || 0);
+  const level = getLevel(totalEarned);
+  const powerLevel = tapPowerLevel(user);
+  const turboActive = isTurboActive(user, now);
   return {
     id: user.telegram_id,
     firstName: user.first_name,
     username: user.username,
     points: user.points,
+    totalEarned,
     taps: user.taps,
     energy: effectiveEnergy(user, now),
     maxEnergy: user.max_energy,
@@ -85,12 +101,22 @@ export async function profileView(env: Env, user: UserRow) {
     referrals: refs,
     walletAddress: user.wallet_address,
     canClaimDaily: user.last_daily_day !== utcDay(now),
+    tapPower: powerLevel,
+    tapPowerLevel: powerLevel,
+    tapPowerUpgradeCost: tapPowerUpgradeCost(powerLevel),
+    maxTapPower: MAX_TAP_POWER,
+    turboActive,
+    turboMultiplier: TURBO_MULTIPLIER,
+    turboDurationSeconds: TURBO_DURATION_SECONDS,
+    turboUntil: Number(user.turbo_until || 0),
+    turboRemainingSeconds: turboActive ? Math.max(0, Math.ceil((Number(user.turbo_until) - now) / 1000)) : 0,
+    turboCost: turboCost(user),
     ...level,
   };
 }
 
 export async function leaderboard(env: Env, limit = 20) {
-  const result = await env.DB.prepare('SELECT telegram_id, username, first_name, points FROM users ORDER BY points DESC, id ASC LIMIT ?')
+  const result = await env.DB.prepare('SELECT telegram_id, username, first_name, total_earned AS points FROM users ORDER BY total_earned DESC, id ASC LIMIT ?')
     .bind(Math.min(Math.max(limit, 1), 100))
     .all<{ telegram_id: string; username: string | null; first_name: string; points: number }>();
   return result.results || [];
