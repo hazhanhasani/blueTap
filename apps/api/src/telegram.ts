@@ -41,8 +41,12 @@ export async function validateTelegramInitData(initData: string, botToken: strin
     throw new Error('Expired Telegram session');
   }
 
+  // Telegram's bot-token validation hashes every received initData field except `hash`.
+  // Since Bot API 8.0, initData can also contain `signature`; that field must remain
+  // in this data-check-string. (The separate Ed25519 third-party validation flow
+  // excludes both hash and signature, which is a different verification method.)
   const dataCheckString = [...params.entries()]
-    .filter(([key]) => key !== 'hash' && key !== 'signature')
+    .filter(([key]) => key !== 'hash')
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${key}=${value}`)
     .join('\n');
