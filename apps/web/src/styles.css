@@ -18,11 +18,14 @@ button { -webkit-tap-highlight-color: transparent; }
 .balance-card small { color: #8797ab; }
 .level-track, .energy-track, .task-track { height: 7px; border-radius: 999px; background: #e8f1fb; overflow: hidden; }
 .level-track i, .energy-track i, .task-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #1aa4ff, #2867df); transition: width .25s ease; }
-.coin { width: 220px; height: 220px; border-radius: 50%; border: 0; margin: 16px auto 2px; display: grid; place-items: center; cursor: pointer; background: radial-gradient(circle at 38% 30%, #7ed9ff, #168de9 45%, #074eae 72%, #042f73); box-shadow: 0 24px 50px #067bdc4a, inset 0 0 0 9px #ffffff24, inset 0 0 0 13px #082f7b70; transition: transform .08s ease; }
+.coin-stage { position: relative; width: 220px; height: 220px; margin: 16px auto 2px; isolation: isolate; }
+.coin { position: relative; z-index: 1; width: 100%; height: 100%; border-radius: 50%; border: 0; margin: 0; display: grid; place-items: center; cursor: pointer; background: radial-gradient(circle at 38% 30%, #7ed9ff, #168de9 45%, #074eae 72%, #042f73); box-shadow: 0 24px 50px #067bdc4a, inset 0 0 0 9px #ffffff24, inset 0 0 0 13px #082f7b70; transition: transform .08s ease; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .coin:active { transform: scale(.95); }
-.coin-ring { width: 166px; height: 166px; border: 2px solid #bfeaffaa; border-radius: 50%; display: grid; place-items: center; align-content: center; color: #fff; box-shadow: inset 0 0 30px #bcecff45; }
+.coin-ring { width: 166px; height: 166px; border: 2px solid #bfeaffaa; border-radius: 50%; display: grid; place-items: center; align-content: center; color: #fff; box-shadow: inset 0 0 30px #bcecff45; pointer-events: none; }
 .coin-ring b { font-size: 88px; line-height: .8; font-family: Arial Black, sans-serif; text-shadow: 0 7px 14px #003d8e80; }
 .coin-ring small { margin-top: 12px; font-size: 12px; letter-spacing: 3px; font-weight: 800; }
+.tap-effects { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: visible; }
+.floating-tap { position: absolute; transform: translate(-50%, -50%); color: #fff; font-size: 28px; line-height: 1; font-weight: 800; text-shadow: 0 3px 10px #004a9dbf, 0 0 18px #42b9ffcc; animation: tapFloat .76s cubic-bezier(.18,.72,.2,1) forwards; will-change: transform, opacity; }
 .tap-hint { text-align: center; color: #73869e; margin: 0 0 4px; font-size: 12px; }
 .energy-card { padding: 14px 16px; border-radius: 18px; }
 .energy-card > div:first-child { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; }
@@ -70,4 +73,10 @@ button { -webkit-tap-highlight-color: transparent; }
 .spinner { width: 36px; height: 36px; border: 4px solid #cfe8ff; border-top-color: #147edb; border-radius: 50%; animation: spin .8s linear infinite; }
 .error { color: #bd3e3e; max-width: 300px; text-align: center; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 380px) { .coin { width: 190px; height: 190px; } .coin-ring { width: 145px; height: 145px; } .coin-ring b { font-size: 72px; } }
+@keyframes tapFloat {
+  0% { opacity: 0; transform: translate(-50%, -35%) scale(.72); }
+  18% { opacity: 1; transform: translate(-50%, -58%) scale(1.08); }
+  58% { opacity: 1; transform: translate(-50%, -105%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -165%) scale(1.16); }
+}
+@media (max-width: 380px) { .coin-stage { width: 190px; height: 190px; } .coin-ring { width: 145px; height: 145px; } .coin-ring b { font-size: 72px; } }
