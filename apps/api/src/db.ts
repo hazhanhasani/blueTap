@@ -55,8 +55,14 @@ export async function getUserByTelegramId(env: Env, telegramId: string) {
 export async function ensureUser(env: Env, auth: TelegramAuth) {
   const existing = await getUserByTelegramId(env, auth.id);
   if (existing) {
+    const now = Date.now();
+    const inviteCode = auth.startParam?.startsWith('ref_') ? auth.startParam.slice(4) : '';
+    const accountAge = now - Number(existing.created_at || 0);
+    if (!existing.referred_by && inviteCode && accountAge >= 0 && accountAge <= 24 * 60 * 60 * 1000) {
+      await applyReferral(env, existing, inviteCode);
+    }
     await env.DB.prepare('UPDATE users SET username = ?, first_name = ?, updated_at = ? WHERE id = ?')
-      .bind(auth.username || null, auth.firstName, Date.now(), existing.id)
+      .bind(auth.username || null, auth.firstName, now, existing.id)
       .run();
     const fresh = (await getUserByTelegramId(env, auth.id))!;
     return { user: await normalizeActivityCounters(env, fresh), created: false };
@@ -79,12 +85,17 @@ export async function ensureUser(env: Env, auth: TelegramAuth) {
 }
 
 async function applyReferral(env: Env, user: UserRow, code: string) {
-  if (user.referred_by) return;
+  if (user.referred_by || !/^bt[a-z0-9]+$/i.test(code)) return;
   const inviter = await env.DB.prepare('SELECT * FROM users WHERE referral_code = ?').bind(code).first<UserRow>();
   if (!inviter || inviter.id === user.id) return;
   const now = Date.now();
+  const linked = await env.DB.prepare(`
+    UPDATE users
+    SET referred_by = ?, points = points + 100, total_earned = total_earned + 100, updated_at = ?
+    WHERE id = ? AND referred_by IS NULL
+  `).bind(inviter.id, now, user.id).run();
+  if (!linked.meta.changes) return;
   await env.DB.batch([
-    env.DB.prepare('UPDATE users SET referred_by = ?, points = points + 100, total_earned = total_earned + 100, updated_at = ? WHERE id = ? AND referred_by IS NULL').bind(inviter.id, now, user.id),
     env.DB.prepare('UPDATE users SET points = points + 500, total_earned = total_earned + 500, updated_at = ? WHERE id = ?').bind(now, inviter.id),
     env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, 100, ?, ?, ?)').bind(user.id, 'referral_join', JSON.stringify({ inviter: inviter.id }), now),
     env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, 500, ?, ?, ?)').bind(inviter.id, 'referral_invite', JSON.stringify({ referred: user.id }), now),
