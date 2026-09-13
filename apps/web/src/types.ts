@@ -3,6 +3,7 @@ export interface Profile {
   firstName: string;
   username: string | null;
   points: number;
+  totalEarned: number;
   taps: number;
   energy: number;
   maxEnergy: number;
@@ -13,6 +14,16 @@ export interface Profile {
   level: number;
   name: string;
   nextLevelPoints: number | null;
+  tapPower: number;
+  tapPowerLevel: number;
+  tapPowerUpgradeCost: number | null;
+  maxTapPower: number;
+  turboActive: boolean;
+  turboMultiplier: number;
+  turboDurationSeconds: number;
+  turboUntil: number;
+  turboRemainingSeconds: number;
+  turboCost: number;
 }
 
 export interface Task {
