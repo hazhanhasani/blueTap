@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { TonConnectButton, useTonWallet } from '@tonconnect/ui-react';
 import { api } from './api';
 import type { Bootstrap, Profile, Task } from './types';
 
 type Tab = 'mine' | 'tasks' | 'friends' | 'wallet';
+type FloatingTap = { id: number; x: number; y: number; value: number };
 
 const nf = new Intl.NumberFormat('fa-IR');
 
@@ -18,9 +20,12 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('mine');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [floatingTaps, setFloatingTaps] = useState<FloatingTap[]>([]);
   const pendingTaps = useRef(0);
   const flushTimer = useRef<number | null>(null);
   const flushing = useRef(false);
+  const tapVisualId = useRef(0);
+  const energyRef = useRef(0);
   const wallet = useTonWallet();
 
   const telegramInitData = window.Telegram?.WebApp?.initData?.trim() || '';
@@ -41,6 +46,10 @@ export default function App() {
   }, [telegramAccessAllowed]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    energyRef.current = profile?.energy ?? 0;
+  }, [profile?.energy]);
 
   const flush = useCallback(async () => {
     if (flushing.current || pendingTaps.current <= 0) return;
@@ -71,8 +80,22 @@ export default function App() {
     }, 450);
   }, [flush]);
 
-  const tap = () => {
-    if (!profile || profile.energy <= 0) return;
+  const addFloatingTap = useCallback((x: number, y: number, value = 1) => {
+    const id = ++tapVisualId.current;
+    setFloatingTaps((prev) => [...prev.slice(-39), { id, x, y, value }]);
+    window.setTimeout(() => {
+      setFloatingTaps((prev) => prev.filter((item) => item.id !== id));
+    }, 760);
+  }, []);
+
+  const tap = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (!profile || energyRef.current <= 0) return;
+
+    energyRef.current -= 1;
+    const rect = event.currentTarget.getBoundingClientRect();
+    addFloatingTap(event.clientX - rect.left, event.clientY - rect.top, 1);
+
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light');
     pendingTaps.current += 1;
     setProfile((p) => p ? { ...p, points: p.points + 1, taps: p.taps + 1, energy: Math.max(0, p.energy - 1) } : p);
@@ -158,9 +181,27 @@ export default function App() {
             <small>{profile.nextLevelPoints ? `تا سطح بعد: ${nf.format(Math.max(0, profile.nextLevelPoints - profile.points))}` : 'بالاترین سطح'}</small>
           </div>
 
-          <button className="coin" onClick={tap} aria-label="Tap to mine">
-            <span className="coin-ring"><b>B</b><small>BLUEX</small></span>
-          </button>
+          <div className="coin-stage">
+            <button
+              className="coin"
+              onPointerDown={tap}
+              onContextMenu={(event) => event.preventDefault()}
+              aria-label="Tap to mine"
+            >
+              <span className="coin-ring"><b>B</b><small>BLUEX</small></span>
+            </button>
+            <div className="tap-effects" aria-hidden="true">
+              {floatingTaps.map((item) => (
+                <span
+                  className="floating-tap"
+                  key={item.id}
+                  style={{ left: `${item.x}px`, top: `${item.y}px` }}
+                >
+                  +{item.value}
+                </span>
+              ))}
+            </div>
+          </div>
           <p className="tap-hint">برای جمع‌کردن امتیاز ضربه بزن</p>
 
           <div className="energy-card">
