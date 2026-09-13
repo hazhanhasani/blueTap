@@ -19,4 +19,4 @@ migrations_dir = "migrations"
 directory = "../web/dist"
 not_found_handling = "single-page-application"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/health"]
+run_worker_first = ["/api/*", "/health", "/telegram/*"]
