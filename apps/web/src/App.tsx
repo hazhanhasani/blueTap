@@ -142,7 +142,7 @@ export default function App() {
         profile: Profile;
       }>('/api/tap', { method: 'POST', body: JSON.stringify({ count }) });
       applyServerProfile(response.profile);
-      if (response.luckyHits > 0) setFlash(`🍀 ضربه شانسی ×${nf.format(response.highestLuckyMultiplier)} · +${nf.format(response.luckyBonus)} امتیاز`);
+      if (response.luckyHits > 0) window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
     } catch (e) {
       pendingTaps.current = 0;
       setError(friendlyError(e, 'ثبت ضربه انجام نشد.'));
