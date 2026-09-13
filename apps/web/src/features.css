@@ -46,3 +46,25 @@
 .coin-stage.skin-cyber .coin-ring { border-color: #b7fff2c4; }
 @keyframes featurePop { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @media (max-width: 380px) { .skins-grid { grid-template-columns: 1fr 1fr; } .league-card > div { flex-wrap: wrap; } }
+
+
+/* Mobile UX polish */
+.balance-meta { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 9px; }
+.balance-meta small { padding: 4px 8px; border-radius: 999px; background: #f3f8fe; color: #6f8298; font-size: 10px; }
+.feature-flash { pointer-events: none; }
+.quick-card, .chest-card button, .upgrade-card > button, .task button, .league-card button, .auto-mine-card > button, .skin-card { min-height: 44px; }
+.quick-card, .upgrade-card, .chest-card, .jackpot-card, .league-card { transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
+.quick-card:not(:disabled):active, .chest-card button:not(:disabled):active, .upgrade-card > button:not(:disabled):active, .task button:not(:disabled):active, .league-card button:not(:disabled):active, .auto-mine-card > button:not(:disabled):active, .skin-card:not(:disabled):active { transform: scale(.98); }
+.quick-card { min-height: 96px; }
+.upgrade-copy p { line-height: 1.65; }
+.jackpot-card p { line-height: 1.65; }
+.task button { min-width: 78px; }
+.skins-title { padding-top: 4px; }
+@media (max-width: 380px) {
+  .quick-grid { gap: 8px; }
+  .quick-card { padding: 12px; min-height: 90px; }
+  .upgrade-card { grid-template-columns: 46px 1fr; gap: 10px; padding: 13px; }
+  .upgrade-icon { width: 46px; height: 46px; border-radius: 14px; font-size: 24px; }
+  .task { grid-template-columns: 1fr; gap: 8px; }
+  .task button { width: 100%; }
+}

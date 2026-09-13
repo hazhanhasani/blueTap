@@ -11,10 +11,10 @@ export const JACKPOT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export const JACKPOT_CONTRIBUTION_PERCENT = 5;
 
 export const SKINS = [
-  { id: 'blue', name: 'Blue Classic', cost: 0, icon: '🔵' },
-  { id: 'neon', name: 'Neon Pulse', cost: 15_000, icon: '🟣' },
-  { id: 'gold', name: 'Golden Gram', cost: 30_000, icon: '🟡' },
-  { id: 'cyber', name: 'Cyber Blue', cost: 50_000, icon: '💠' },
+  { id: 'blue', name: 'آبی کلاسیک', cost: 0, icon: '🔵' },
+  { id: 'neon', name: 'نئون', cost: 15_000, icon: '🟣' },
+  { id: 'gold', name: 'طلایی', cost: 30_000, icon: '🟡' },
+  { id: 'cyber', name: 'سایبری', cost: 50_000, icon: '💠' },
 ] as const;
 
 export const CHALLENGES = [
@@ -27,11 +27,11 @@ export const CHALLENGES = [
 ] as const;
 
 export const LEAGUES = [
-  { id: 'bronze', name: 'Bronze', min: 0, reward: 500 },
-  { id: 'silver', name: 'Silver', min: 10_000, reward: 1_500 },
-  { id: 'gold', name: 'Gold', min: 50_000, reward: 4_000 },
-  { id: 'diamond', name: 'Diamond', min: 150_000, reward: 10_000 },
-  { id: 'master', name: 'Master', min: 500_000, reward: 25_000 },
+  { id: 'bronze', name: 'برنزی', min: 0, reward: 500 },
+  { id: 'silver', name: 'نقره‌ای', min: 10_000, reward: 1_500 },
+  { id: 'gold', name: 'طلایی', min: 50_000, reward: 4_000 },
+  { id: 'diamond', name: 'الماس', min: 150_000, reward: 10_000 },
+  { id: 'master', name: 'استاد', min: 500_000, reward: 25_000 },
 ] as const;
 
 export function comboMultiplierForCount(count: number) {
@@ -72,12 +72,12 @@ export type ChestReward =
 
 export function rollChestReward(maxEnergy: number): ChestReward {
   const roll = randomFloat();
-  if (roll < 0.38) return { type: 'points', amount: 500, label: '+500 BP' };
+  if (roll < 0.38) return { type: 'points', amount: 500, label: '+۵۰۰ امتیاز' };
   if (roll < 0.60) return { type: 'energy', amount: Math.max(250, Math.floor(maxEnergy * 0.25)), label: 'شارژ انرژی' };
-  if (roll < 0.74) return { type: 'auto_boost', durationMs: 10 * 60 * 1000, label: 'Auto Mine ×2 برای ۱۰ دقیقه' };
-  if (roll < 0.86) return { type: 'shield', amount: 1, label: '+1 Mining Shield' };
-  if (roll < 0.97) return { type: 'points', amount: 2_000, label: '+2,000 BP' };
-  return { type: 'turbo', durationMs: 60 * 1000, label: 'Turbo رایگان برای ۶۰ ثانیه' };
+  if (roll < 0.74) return { type: 'auto_boost', durationMs: 10 * 60 * 1000, label: 'ماین خودکار ×۲ برای ۱۰ دقیقه' };
+  if (roll < 0.86) return { type: 'shield', amount: 1, label: '+۱ محافظ ماین' };
+  if (roll < 0.97) return { type: 'points', amount: 2_000, label: '+۲٬۰۰۰ امتیاز' };
+  return { type: 'turbo', durationMs: 60 * 1000, label: 'توربو رایگان برای ۶۰ ثانیه' };
 }
 
 export function utcDayKey(timestamp = Date.now()) {
@@ -117,7 +117,7 @@ export function blueHourState(now = Date.now()) {
   const nextStartsAt = now < start ? start : start + 24 * 60 * 60 * 1000;
   return {
     active,
-    name: 'Blue Hour',
+    name: 'ساعت آبی',
     tapMultiplier: active ? 2 : 1,
     endsAt: active ? end : null,
     nextStartsAt,

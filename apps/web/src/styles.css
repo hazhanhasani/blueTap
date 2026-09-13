@@ -126,3 +126,17 @@ button { -webkit-tap-highlight-color: transparent; }
   50% { transform: scale(1.06); opacity: 1; }
 }
 @media (max-width: 380px) { .coin-stage { width: 190px; height: 190px; } .coin-ring { width: 145px; height: 145px; } .coin-ring b { font-size: 72px; } .bottom-nav button { font-size: 8px; } .energy-meta { flex-direction: column; } .energy-meta small:last-child { text-align: right; } .auto-mine-stats { grid-template-columns: 1fr; } }
+
+
+/* Interaction polish */
+html { -webkit-text-size-adjust: 100%; }
+body { overscroll-behavior-y: none; }
+button { touch-action: manipulation; }
+.topbar { padding-top: max(2px, env(safe-area-inset-top)); }
+.bottom-nav button { min-height: 52px; }
+@media (max-width: 380px) {
+  .shell { padding-inline: 12px; }
+  .balance-card { padding: 16px 14px; }
+  .balance-card strong { font-size: 32px; }
+  .coin-stage { margin-top: 10px; }
+}
