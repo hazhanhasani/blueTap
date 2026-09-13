@@ -120,7 +120,10 @@ export default function App() {
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      setProfile((p) => p && p.energy < p.maxEnergy ? { ...p, energy: Math.min(p.maxEnergy, p.energy + 1) } : p);
+      setProfile((p) => p && p.energy < p.maxEnergy ? {
+        ...p,
+        energy: Math.min(p.maxEnergy, p.energy + p.energyRegenPerSecond),
+      } : p);
     }, 1000);
     return () => window.clearInterval(id);
   }, []);
@@ -250,6 +253,14 @@ export default function App() {
           <div className="energy-card">
             <div><span>⚡ انرژی</span><b>{nf.format(profile.energy)} / {nf.format(profile.maxEnergy)}</b></div>
             <div className="energy-track"><i style={{ width: `${(profile.energy / profile.maxEnergy) * 100}%` }} /></div>
+            <div className="energy-meta">
+              <small>بازیابی: +{nf.format(profile.energyRegenPerSecond)} انرژی در ثانیه</small>
+              {profile.nextMaxEnergy ? (
+                <small>سطح بعد: سقف {nf.format(profile.nextMaxEnergy)} · بازیابی +{nf.format(profile.nextEnergyRegenPerSecond || profile.energyRegenPerSecond)}/ثانیه</small>
+              ) : (
+                <small>بالاترین سطح انرژی فعال است</small>
+              )}
+            </div>
           </div>
 
           <div className="quick-grid">
@@ -272,6 +283,15 @@ export default function App() {
 
         {tab === 'boost' && <section className="panel boost-panel">
           <div className="section-title"><h2>ارتقا استخراج</h2><span>{nf.format(profile.points)} BP</span></div>
+
+          <article className="upgrade-card">
+            <div className="upgrade-icon">🔋</div>
+            <div className="upgrade-copy">
+              <b>مزایای سطح {nf.format(profile.level)}</b>
+              <strong>{nf.format(profile.maxEnergy)} <small>سقف انرژی · +{nf.format(profile.energyRegenPerSecond)}/ثانیه</small></strong>
+              <p>{profile.nextMaxEnergy ? `با رسیدن به سطح بعد، سقف انرژی به ${nf.format(profile.nextMaxEnergy)} می‌رسد و سرعت بازیابی هم بر اساس سطح جدید افزایش می‌یابد.` : 'به بالاترین سطح فعلی رسیده‌ای و بیشترین سقف انرژی فعال است.'}</p>
+            </div>
+          </article>
 
           <article className="upgrade-card">
             <div className="upgrade-icon">👆</div>
