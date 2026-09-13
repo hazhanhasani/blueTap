@@ -32,6 +32,20 @@ jobs:
       - name: Apply production hardening
         run: python3 scripts/security_hardening.py
 
+      - name: Cache-bust committed production smoke test
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/ci.yml')
+          text = path.read_text()
+          old = '"$APP_URL/tonconnect-manifest.json" > /tmp/manifest.json'
+          new = '"$APP_URL/tonconnect-manifest.json?deploy=$GITHUB_SHA" > /tmp/manifest.json'
+          if old not in text:
+              raise SystemExit('CI manifest smoke target not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Refresh package lock after version pinning
         run: npm install --package-lock-only --ignore-scripts
 
@@ -66,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --retry 4 --retry-delay 2 "$APP_URL/health" > /tmp/health.json
-          curl --fail --silent --show-error --retry 4 --retry-delay 2 "$APP_URL/tonconnect-manifest.json" > /tmp/manifest.json
+          curl --fail --silent --show-error --retry 4 --retry-delay 2 "$APP_URL/tonconnect-manifest.json?deploy=$GITHUB_SHA" > /tmp/manifest.json
           node - <<'NODE'
           const fs = require('fs');
           const health = JSON.parse(fs.readFileSync('/tmp/health.json', 'utf8'));
