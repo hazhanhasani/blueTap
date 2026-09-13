@@ -1,3 +1,7 @@
+import {
+  AUTO_MINE_BOOST_MULTIPLIER,
+  prestigeMultiplier,
+} from './features';
 import type { UserRow } from './types';
 
 export const TAP_BUCKET_CAPACITY = 20;
@@ -73,11 +77,17 @@ export function autoMineLevel(user: UserRow) {
   return Math.min(MAX_AUTO_MINE_LEVEL, Math.max(1, Number(user.auto_mine_level || 1)));
 }
 
-export function autoMineRatePerMinute(userOrLevel: UserRow | number) {
+export function autoMineBaseRatePerMinute(userOrLevel: UserRow | number, prestigeLevel = 0) {
   const level = typeof userOrLevel === 'number'
     ? Math.min(MAX_AUTO_MINE_LEVEL, Math.max(1, Math.floor(userOrLevel || 1)))
     : autoMineLevel(userOrLevel);
-  return level * AUTO_MINE_BASE_RATE_PER_MINUTE;
+  const prestige = typeof userOrLevel === 'number' ? prestigeLevel : Number(userOrLevel.prestige_level || 0);
+  return Math.max(1, Math.floor(level * AUTO_MINE_BASE_RATE_PER_MINUTE * prestigeMultiplier(prestige)));
+}
+
+export function autoMineRatePerMinute(user: UserRow, now = Date.now()) {
+  const base = autoMineBaseRatePerMinute(user);
+  return Number(user.auto_mine_boost_until || 0) > now ? base * AUTO_MINE_BOOST_MULTIPLIER : base;
 }
 
 export function autoMineUpgradeCost(currentLevel: number) {
@@ -88,7 +98,7 @@ export function autoMineUpgradeCost(currentLevel: number) {
 
 export function autoMineState(user: UserRow, now = Date.now()) {
   const level = autoMineLevel(user);
-  const ratePerMinute = autoMineRatePerMinute(level);
+  const baseRatePerMinute = autoMineBaseRatePerMinute(user);
   const fallback = Number(user.updated_at || user.created_at || now);
   const lastAt = Number(user.auto_mine_last_at || fallback);
   const confirmedAt = Number(user.auto_mine_confirmed_at || fallback);
@@ -96,12 +106,19 @@ export function autoMineState(user: UserRow, now = Date.now()) {
   const accrualEnd = Math.min(now, deadlineAt);
   const accrualStart = Math.min(lastAt, accrualEnd);
   const elapsedMs = Math.max(0, accrualEnd - accrualStart);
-  const pending = Math.floor((elapsedMs * ratePerMinute) / 60_000);
+  const boostUntil = Number(user.auto_mine_boost_until || 0);
+  const boostedEnd = Math.min(accrualEnd, boostUntil);
+  const boostedMs = Math.max(0, boostedEnd - accrualStart);
+  const normalPending = (elapsedMs * baseRatePerMinute) / 60_000;
+  const boostBonus = (boostedMs * baseRatePerMinute * (AUTO_MINE_BOOST_MULTIPLIER - 1)) / 60_000;
+  const pending = Math.floor(normalPending + boostBonus);
   const expired = now >= deadlineAt;
+  const boostActive = boostUntil > now;
 
   return {
     level,
-    ratePerMinute,
+    baseRatePerMinute,
+    ratePerMinute: boostActive ? baseRatePerMinute * AUTO_MINE_BOOST_MULTIPLIER : baseRatePerMinute,
     lastAt,
     confirmedAt,
     deadlineAt,
@@ -109,6 +126,9 @@ export function autoMineState(user: UserRow, now = Date.now()) {
     expired,
     remainingSeconds: expired ? 0 : Math.max(0, Math.ceil((deadlineAt - now) / 1000)),
     burnedTotal: Number(user.auto_mine_burned || 0),
+    boostActive,
+    boostUntil,
+    boostRemainingSeconds: boostActive ? Math.max(0, Math.ceil((boostUntil - now) / 1000)) : 0,
   };
 }
 

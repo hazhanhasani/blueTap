@@ -1,0 +1,48 @@
+.feature-flash { position: sticky; top: 8px; z-index: 20; margin-bottom: 10px; padding: 10px 14px; border-radius: 14px; background: #102f58ee; color: #fff; text-align: center; font-size: 12px; font-weight: 800; box-shadow: 0 12px 32px #12385a3a; backdrop-filter: blur(12px); animation: featurePop .22s ease-out; }
+.event-banner, .combo-banner { border-radius: 16px; padding: 10px 14px; text-align: center; font-size: 12px; font-weight: 800; }
+.event-banner { border: 1px solid #8ddcff; background: linear-gradient(90deg, #eaf9ff, #ccefff); color: #0875a8; box-shadow: 0 10px 26px #2194c51f; }
+.combo-banner { border: 1px solid #ffb689; background: linear-gradient(90deg, #fff2e8, #ffe1cd); color: #b74a00; }
+.mini-boost { margin-top: 9px; padding: 8px 10px; border-radius: 12px; background: #fff2bd; color: #8b6200; font-size: 11px; font-weight: 800; text-align: center; }
+.chest-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #d9e6f4; background: #fff; border-radius: 19px; padding: 14px; box-shadow: 0 12px 30px #234f7d12; }
+.chest-card.ready { border-color: #ffd46f; background: linear-gradient(180deg, #fffdf4, #fff7d7); box-shadow: 0 12px 34px #dca30021; }
+.chest-card > div { display: grid; grid-template-columns: 34px 1fr; align-items: center; column-gap: 8px; }
+.chest-card > div > span { grid-row: 1 / 3; font-size: 25px; }
+.chest-card b, .chest-card small { display: block; }
+.chest-card small { color: #788ba1; font-size: 10px; }
+.chest-card button { border: 0; border-radius: 12px; padding: 9px 12px; background: #147edb; color: #fff; font-weight: 800; }
+.chest-card button:disabled { background: #e6edf5; color: #96a4b4; }
+.jackpot-card { border: 1px solid #e5d5ff; background: linear-gradient(180deg, #fdfaff, #f5edff); border-radius: 22px; padding: 16px; box-shadow: 0 14px 34px #7f4bc218; }
+.jackpot-card p { margin: 0 0 8px; color: #6e6383; font-size: 11px; line-height: 1.8; }
+.jackpot-card small { color: #8669a8; }
+.booster-card { border-color: #ffe09a; background: linear-gradient(180deg, #fffdf5, #fff7db); }
+.booster-card .upgrade-icon { background: #fff0b8; }
+.booster-card.active { box-shadow: 0 0 0 2px #ffc83d2b, 0 14px 30px #dca3001f; }
+.shield-card { border-color: #bfe2ff; background: linear-gradient(180deg, #f8fcff, #edf7ff); }
+.prestige-card { border-color: #ddd2ff; background: linear-gradient(180deg, #fcfaff, #f4efff); }
+.prestige-card.ready { box-shadow: 0 0 0 2px #8d67ff24, 0 16px 34px #7452c320; }
+.skins-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 2px; }
+.skins-title small { color: #788ba1; font-size: 10px; }
+.skins-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
+.skin-card { border: 1px solid #dce9f6; background: #fff; border-radius: 16px; padding: 12px; color: inherit; text-align: center; cursor: pointer; }
+.skin-card span, .skin-card b, .skin-card small { display: block; }
+.skin-card span { font-size: 28px; }
+.skin-card b { margin-top: 4px; font-size: 11px; }
+.skin-card small { margin-top: 2px; color: #72869d; font-size: 9px; }
+.skin-card.selected { border-color: #2d8ce6; background: #edf7ff; box-shadow: inset 0 0 0 1px #2d8ce6; }
+.skin-card:disabled { opacity: .66; cursor: default; }
+.league-card { border: 1px solid #d9e7f7; background: linear-gradient(180deg, #fbfdff, #f1f7ff); border-radius: 18px; padding: 14px; margin-bottom: 16px; }
+.league-card > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.league-card small { color: #72869b; }
+.league-card strong { color: #176fc1; font-size: 18px; }
+.league-card span { font-size: 11px; color: #6e8198; }
+.league-card p { margin: 9px 0 0; font-size: 11px; }
+.league-card button { width: 100%; border: 0; border-radius: 12px; padding: 10px; margin-top: 10px; background: #147edb; color: #fff; font-weight: 800; }
+.subheading { margin: 18px 0 4px; font-size: 13px; color: #315b85; }
+.coin-stage.skin-neon .coin { background: radial-gradient(circle at 35% 28%, #ff9df5, #9b42ff 45%, #4a0ca2 75%, #200348); box-shadow: 0 24px 52px #8d30e552, inset 0 0 0 9px #ffffff24, inset 0 0 0 13px #4a0d7b70; }
+.coin-stage.skin-gold .coin { background: radial-gradient(circle at 35% 28%, #fff6a8, #f4b933 44%, #bd7110 74%, #623200); box-shadow: 0 24px 52px #e9a31f55, inset 0 0 0 9px #ffffff29, inset 0 0 0 13px #74400070; }
+.coin-stage.skin-cyber .coin { background: radial-gradient(circle at 35% 28%, #7fffe8, #11b7ce 42%, #1455b2 70%, #071c53); box-shadow: 0 24px 52px #0fc5d950, 0 0 26px #44efff55, inset 0 0 0 9px #ffffff24, inset 0 0 0 13px #0b467a70; }
+.coin-stage.skin-neon .coin-ring { border-color: #ffd3ffb5; }
+.coin-stage.skin-gold .coin-ring { border-color: #fff3b7c9; }
+.coin-stage.skin-cyber .coin-ring { border-color: #b7fff2c4; }
+@keyframes featurePop { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (max-width: 380px) { .skins-grid { grid-template-columns: 1fr 1fr; } .league-card > div { flex-wrap: wrap; } }

@@ -1,4 +1,18 @@
 import {
+  AUTO_MINE_BOOST_COST,
+  AUTO_MINE_BOOST_DURATION_MS,
+  AUTO_MINE_BOOST_MULTIPLIER,
+  blueHourState,
+  chestState,
+  COMBO_WINDOW_MS,
+  comboMultiplierForCount,
+  MAX_MINING_SHIELDS,
+  MINING_SHIELD_COST,
+  nextDailyReward,
+  PRESTIGE_BONUS_PERCENT,
+  PRESTIGE_STEP,
+} from './features';
+import {
   AUTO_MINE_CONFIRM_WINDOW_SECONDS,
   autoMineState,
   autoMineUpgradeCost,
@@ -15,6 +29,7 @@ import {
   turboCost,
   utcDay,
 } from './game';
+import { normalizeActivityCounters } from './systems';
 import type { Env, TelegramAuth, UserRow } from './types';
 
 function referralCode(telegramId: string) {
@@ -23,6 +38,14 @@ function referralCode(telegramId: string) {
   } catch {
     return `bt${telegramId.replace(/\D/g, '').slice(-12)}`;
   }
+}
+
+function parseUnlockedSkins(raw: string) {
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    if (Array.isArray(parsed)) return Array.from(new Set(['blue', ...parsed.map(String)]));
+  } catch {}
+  return ['blue'];
 }
 
 export async function getUserByTelegramId(env: Env, telegramId: string) {
@@ -35,7 +58,8 @@ export async function ensureUser(env: Env, auth: TelegramAuth) {
     await env.DB.prepare('UPDATE users SET username = ?, first_name = ?, updated_at = ? WHERE id = ?')
       .bind(auth.username || null, auth.firstName, Date.now(), existing.id)
       .run();
-    return { user: (await getUserByTelegramId(env, auth.id))!, created: false };
+    const fresh = (await getUserByTelegramId(env, auth.id))!;
+    return { user: await normalizeActivityCounters(env, fresh), created: false };
   }
 
   const now = Date.now();
@@ -48,7 +72,8 @@ export async function ensureUser(env: Env, auth: TelegramAuth) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(auth.id, auth.username || null, auth.firstName, referralCode(auth.id), now, now, now, now, now, now).run();
 
-  const user = (await getUserByTelegramId(env, auth.id))!;
+  let user = (await getUserByTelegramId(env, auth.id))!;
+  user = await normalizeActivityCounters(env, user, now);
   if (auth.startParam?.startsWith('ref_')) await applyReferral(env, user, auth.startParam.slice(4));
   return { user: (await getUserByTelegramId(env, auth.id))!, created: true };
 }
@@ -57,7 +82,6 @@ async function applyReferral(env: Env, user: UserRow, code: string) {
   if (user.referred_by) return;
   const inviter = await env.DB.prepare('SELECT * FROM users WHERE referral_code = ?').bind(code).first<UserRow>();
   if (!inviter || inviter.id === user.id) return;
-
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare('UPDATE users SET referred_by = ?, points = points + 100, total_earned = total_earned + 100, updated_at = ? WHERE id = ? AND referred_by IS NULL').bind(inviter.id, now, user.id),
@@ -91,24 +115,35 @@ export async function taskView(env: Env, user: UserRow) {
 
 export async function profileView(env: Env, user: UserRow) {
   const now = Date.now();
-  const refs = await referralCount(env, user.id);
-  const totalEarned = Number(user.total_earned || 0);
+  const normalized = await normalizeActivityCounters(env, user, now);
+  const refs = await referralCount(env, normalized.id);
+  const totalEarned = Number(normalized.total_earned || 0);
   const level = getLevel(totalEarned);
-  const powerLevel = tapPowerLevel(user);
-  const turboActive = isTurboActive(user, now);
-  const autoMine = autoMineState(user, now);
+  const powerLevel = tapPowerLevel(normalized);
+  const turboActive = isTurboActive(normalized, now);
+  const autoMine = autoMineState(normalized, now);
+  const comboActive = now - Number(normalized.combo_last_at || 0) <= COMBO_WINDOW_MS;
+  const comboCount = comboActive ? Number(normalized.combo_count || 0) : 0;
+  const prestigeLevel = Number(normalized.prestige_level || 0);
+  const chest = chestState(Number(normalized.last_chest_at || 0), now);
+  const event = blueHourState(now);
+  const dailyStreak = Number(normalized.daily_streak || 0);
+  const prestigeRequirement = PRESTIGE_STEP * (prestigeLevel + 1);
+
   return {
-    id: user.telegram_id,
-    firstName: user.first_name,
-    username: user.username,
-    points: user.points,
+    id: normalized.telegram_id,
+    firstName: normalized.first_name,
+    username: normalized.username,
+    points: normalized.points,
     totalEarned,
-    taps: user.taps,
-    energy: effectiveEnergy(user, now),
-    referralCode: user.referral_code,
+    taps: normalized.taps,
+    energy: effectiveEnergy(normalized, now),
+    referralCode: normalized.referral_code,
     referrals: refs,
-    walletAddress: user.wallet_address,
-    canClaimDaily: user.last_daily_day !== utcDay(now),
+    walletAddress: normalized.wallet_address,
+    canClaimDaily: normalized.last_daily_day !== utcDay(now),
+    dailyStreak,
+    dailyNextReward: nextDailyReward(dailyStreak),
     tapPower: powerLevel,
     tapPowerLevel: powerLevel,
     tapPowerUpgradeCost: tapPowerUpgradeCost(powerLevel),
@@ -116,11 +151,12 @@ export async function profileView(env: Env, user: UserRow) {
     turboActive,
     turboMultiplier: TURBO_MULTIPLIER,
     turboDurationSeconds: TURBO_DURATION_SECONDS,
-    turboUntil: Number(user.turbo_until || 0),
-    turboRemainingSeconds: turboActive ? Math.max(0, Math.ceil((Number(user.turbo_until) - now) / 1000)) : 0,
-    turboCost: turboCost(user),
+    turboUntil: Number(normalized.turbo_until || 0),
+    turboRemainingSeconds: turboActive ? Math.max(0, Math.ceil((Number(normalized.turbo_until) - now) / 1000)) : 0,
+    turboCost: turboCost(normalized),
     autoMineLevel: autoMine.level,
     autoMineRatePerMinute: autoMine.ratePerMinute,
+    autoMineBaseRatePerMinute: autoMine.baseRatePerMinute,
     autoMineUpgradeCost: autoMineUpgradeCost(autoMine.level),
     maxAutoMineLevel: MAX_AUTO_MINE_LEVEL,
     autoMineLastAt: autoMine.lastAt,
@@ -131,6 +167,29 @@ export async function profileView(env: Env, user: UserRow) {
     autoMineRemainingSeconds: autoMine.remainingSeconds,
     autoMineConfirmWindowSeconds: AUTO_MINE_CONFIRM_WINDOW_SECONDS,
     autoMineBurnedTotal: autoMine.burnedTotal,
+    autoMineBoostActive: autoMine.boostActive,
+    autoMineBoostUntil: autoMine.boostUntil,
+    autoMineBoostRemainingSeconds: autoMine.boostRemainingSeconds,
+    autoMineBoostMultiplier: AUTO_MINE_BOOST_MULTIPLIER,
+    autoMineBoostCost: AUTO_MINE_BOOST_COST,
+    autoMineBoostDurationSeconds: Math.floor(AUTO_MINE_BOOST_DURATION_MS / 1000),
+    miningShields: Number(normalized.mining_shields || 0),
+    miningShieldCost: MINING_SHIELD_COST,
+    maxMiningShields: MAX_MINING_SHIELDS,
+    prestigeLevel,
+    prestigeBonusPercent: prestigeLevel * PRESTIGE_BONUS_PERCENT,
+    prestigeRequirement,
+    canPrestige: totalEarned >= prestigeRequirement,
+    comboCount,
+    comboMultiplier: comboMultiplierForCount(comboCount),
+    comboExpiresAt: comboActive ? Number(normalized.combo_last_at) + COMBO_WINDOW_MS : 0,
+    luckyHits: Number(normalized.lucky_hits || 0),
+    chestReady: chest.ready,
+    chestNextAt: chest.nextAt,
+    chestRemainingSeconds: chest.remainingSeconds,
+    selectedSkin: normalized.selected_skin || 'blue',
+    unlockedSkins: parseUnlockedSkins(normalized.unlocked_skins),
+    event,
     ...level,
   };
 }
