@@ -1,5 +1,19 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
+function referralCodeFromPage(): string {
+  const fromUrl = new URLSearchParams(window.location.search).get('ref')?.trim() || '';
+  if (/^bt[a-z0-9]+$/i.test(fromUrl)) {
+    try { window.sessionStorage.setItem('bluetap_referral', fromUrl); } catch {}
+    return fromUrl;
+  }
+  try {
+    const saved = window.sessionStorage.getItem('bluetap_referral')?.trim() || '';
+    return /^bt[a-z0-9]+$/i.test(saved) ? saved : '';
+  } catch {
+    return '';
+  }
+}
+
 function headers() {
   const result: Record<string, string> = { 'Content-Type': 'application/json' };
   const initData = window.Telegram?.WebApp?.initData;
@@ -8,6 +22,8 @@ function headers() {
     result['X-Dev-Telegram-Id'] = import.meta.env.VITE_DEV_TELEGRAM_ID;
     result['X-Dev-First-Name'] = 'BlueTap Dev';
   }
+  const referralCode = referralCodeFromPage();
+  if (referralCode) result['X-Referral-Code'] = referralCode;
   return result;
 }
 
