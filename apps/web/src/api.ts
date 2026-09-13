@@ -1,5 +1,6 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
+// Preserve referral attribution while the invited user enters through the Telegram bot.
 function referralCodeFromPage(): string {
   const fromUrl = new URLSearchParams(window.location.search).get('ref')?.trim() || '';
   if (/^bt[a-z0-9]+$/i.test(fromUrl)) {
