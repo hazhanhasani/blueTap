@@ -12,7 +12,7 @@ export const TURBO_DURATION_SECONDS = 30;
 export const TURBO_BASE_COST = 5_000;
 
 export const MAX_AUTO_MINE_LEVEL = 10;
-export const AUTO_MINE_BASE_RATE_PER_MINUTE = 6;
+export const AUTO_MINE_BASE_RATE_PER_MINUTE = 8;
 export const AUTO_MINE_BASE_COST = 5_000;
 export const AUTO_MINE_CONFIRM_WINDOW_SECONDS = 5 * 60 * 60;
 
