@@ -11,6 +11,7 @@ import {
   nextDailyReward,
   PRESTIGE_BONUS_PERCENT,
   PRESTIGE_STEP,
+  SKINS,
 } from './features';
 import {
   AUTO_MINE_CONFIRM_WINDOW_SECONDS,
@@ -29,6 +30,7 @@ import {
   turboCost,
   utcDay,
 } from './game';
+import { isOwner } from './owner';
 import { normalizeActivityCounters } from './systems';
 import type { Env, TelegramAuth, UserRow } from './types';
 
@@ -113,12 +115,14 @@ export async function claimedTaskIds(env: Env, userId: number) {
 }
 
 export async function taskView(env: Env, user: UserRow) {
+  const ownerMode = isOwner(env, user);
   const [refs, claimed] = await Promise.all([referralCount(env, user.id), claimedTaskIds(env, user.id)]);
   return TASKS.map((task) => {
     let progress = 0;
     if (task.metric === 'taps') progress = user.taps;
     if (task.metric === 'referrals') progress = refs;
     if (task.metric === 'points') progress = user.total_earned;
+    if (ownerMode) return { ...task, progress: task.target, completed: true, claimed: false };
     return { ...task, progress: Math.min(progress, task.target), completed: progress >= task.target, claimed: claimed.has(task.id) };
   });
 }
@@ -126,21 +130,23 @@ export async function taskView(env: Env, user: UserRow) {
 export async function profileView(env: Env, user: UserRow) {
   const now = Date.now();
   const normalized = await normalizeActivityCounters(env, user, now);
+  const ownerMode = isOwner(env, normalized);
   const refs = await referralCount(env, normalized.id);
   const totalEarned = Number(normalized.total_earned || 0);
   const level = getLevel(totalEarned);
   const powerLevel = tapPowerLevel(normalized);
   const turboActive = isTurboActive(normalized, now);
-  const autoMine = autoMineState(normalized, now);
+  const autoMine = autoMineState(normalized, now, ownerMode);
   const comboActive = now - Number(normalized.combo_last_at || 0) <= COMBO_WINDOW_MS;
   const comboCount = comboActive ? Number(normalized.combo_count || 0) : 0;
   const prestigeLevel = Number(normalized.prestige_level || 0);
-  const chest = chestState(Number(normalized.last_chest_at || 0), now);
+  const chest = ownerMode ? { ready: true, nextAt: now, remainingSeconds: 0 } : chestState(Number(normalized.last_chest_at || 0), now);
   const event = blueHourState(now);
   const dailyStreak = Number(normalized.daily_streak || 0);
   const prestigeRequirement = PRESTIGE_STEP * (prestigeLevel + 1);
 
   return {
+    ownerMode,
     id: normalized.telegram_id,
     firstName: normalized.first_name,
     username: normalized.username,
@@ -148,28 +154,28 @@ export async function profileView(env: Env, user: UserRow) {
     updatedAt: Number(normalized.updated_at || 0),
     totalEarned,
     taps: normalized.taps,
-    energy: effectiveEnergy(normalized, now),
+    energy: ownerMode ? Number.MAX_SAFE_INTEGER : effectiveEnergy(normalized, now),
     referralCode: normalized.referral_code,
     referrals: refs,
     walletAddress: normalized.wallet_address,
-    canClaimDaily: normalized.last_daily_day !== utcDay(now),
+    canClaimDaily: ownerMode || normalized.last_daily_day !== utcDay(now),
     dailyStreak,
     dailyNextReward: nextDailyReward(dailyStreak),
     tapPower: powerLevel,
     tapPowerLevel: powerLevel,
-    tapPowerUpgradeCost: tapPowerUpgradeCost(powerLevel),
-    maxTapPower: MAX_TAP_POWER,
+    tapPowerUpgradeCost: ownerMode ? 0 : tapPowerUpgradeCost(powerLevel),
+    maxTapPower: ownerMode ? Number.MAX_SAFE_INTEGER : MAX_TAP_POWER,
     turboActive,
     turboMultiplier: TURBO_MULTIPLIER,
     turboDurationSeconds: TURBO_DURATION_SECONDS,
     turboUntil: Number(normalized.turbo_until || 0),
     turboRemainingSeconds: turboActive ? Math.max(0, Math.ceil((Number(normalized.turbo_until) - now) / 1000)) : 0,
-    turboCost: turboCost(normalized),
+    turboCost: ownerMode ? 0 : turboCost(normalized),
     autoMineLevel: autoMine.level,
     autoMineRatePerMinute: autoMine.ratePerMinute,
     autoMineBaseRatePerMinute: autoMine.baseRatePerMinute,
-    autoMineUpgradeCost: autoMineUpgradeCost(autoMine.level),
-    maxAutoMineLevel: MAX_AUTO_MINE_LEVEL,
+    autoMineUpgradeCost: ownerMode ? 0 : autoMineUpgradeCost(autoMine.level),
+    maxAutoMineLevel: ownerMode ? Number.MAX_SAFE_INTEGER : MAX_AUTO_MINE_LEVEL,
     autoMineLastAt: autoMine.lastAt,
     autoMineConfirmedAt: autoMine.confirmedAt,
     autoMineDeadlineAt: autoMine.deadlineAt,
@@ -182,15 +188,15 @@ export async function profileView(env: Env, user: UserRow) {
     autoMineBoostUntil: autoMine.boostUntil,
     autoMineBoostRemainingSeconds: autoMine.boostRemainingSeconds,
     autoMineBoostMultiplier: AUTO_MINE_BOOST_MULTIPLIER,
-    autoMineBoostCost: AUTO_MINE_BOOST_COST,
+    autoMineBoostCost: ownerMode ? 0 : AUTO_MINE_BOOST_COST,
     autoMineBoostDurationSeconds: Math.floor(AUTO_MINE_BOOST_DURATION_MS / 1000),
     miningShields: Number(normalized.mining_shields || 0),
-    miningShieldCost: MINING_SHIELD_COST,
-    maxMiningShields: MAX_MINING_SHIELDS,
+    miningShieldCost: ownerMode ? 0 : MINING_SHIELD_COST,
+    maxMiningShields: ownerMode ? Number.MAX_SAFE_INTEGER : MAX_MINING_SHIELDS,
     prestigeLevel,
     prestigeBonusPercent: prestigeLevel * PRESTIGE_BONUS_PERCENT,
     prestigeRequirement,
-    canPrestige: totalEarned >= prestigeRequirement,
+    canPrestige: ownerMode || totalEarned >= prestigeRequirement,
     comboCount,
     comboMultiplier: comboMultiplierForCount(comboCount),
     comboExpiresAt: comboActive ? Number(normalized.combo_last_at) + COMBO_WINDOW_MS : 0,
@@ -199,7 +205,7 @@ export async function profileView(env: Env, user: UserRow) {
     chestNextAt: chest.nextAt,
     chestRemainingSeconds: chest.remainingSeconds,
     selectedSkin: normalized.selected_skin || 'blue',
-    unlockedSkins: parseUnlockedSkins(normalized.unlocked_skins),
+    unlockedSkins: ownerMode ? SKINS.map((skin) => skin.id) : parseUnlockedSkins(normalized.unlocked_skins),
     event,
     ...level,
   };

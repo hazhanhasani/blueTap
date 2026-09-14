@@ -50,3 +50,17 @@ test('direct dependencies are pinned and generated TS build info is ignored', ()
   }
   assert.match(read('.gitignore'), /\*\.tsbuildinfo/);
 });
+
+
+test('owner account has explicit unrestricted game mode without disabling Telegram auth', () => {
+  const owner = read('apps/api/src/owner.ts');
+  const wrangler = read('apps/api/wrangler.toml');
+  const api = read('apps/api/src/index.ts');
+  const db = read('apps/api/src/db.ts');
+  assert.match(owner, /8636742848/);
+  assert.match(wrangler, /OWNER_TELEGRAM_ID = "8636742848"/);
+  assert.match(api, /isOwner\(c\.env, user\)/);
+  assert.match(api, /authenticateRequest/);
+  assert.match(db, /ownerMode/);
+  assert.match(db, /Number\.MAX_SAFE_INTEGER/);
+});

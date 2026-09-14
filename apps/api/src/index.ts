@@ -36,6 +36,7 @@ import {
   turboCost,
 } from './game';
 import { ensureUser, getUserByTelegramId, leaderboard, profileView, taskView } from './db';
+import { isOwner } from './owner';
 import {
   challengeView,
   claimChallenge,
@@ -122,7 +123,7 @@ async function appendLedger(env: Env, userId: number, amount: number, kind: stri
 }
 
 async function settleAutoMine(env: Env, user: UserRow, now = Date.now(), manualConfirm = false) {
-  const state = autoMineState(user, now);
+  const state = autoMineState(user, now, isOwner(env, user));
   const expectedLastAt = Number(user.auto_mine_last_at || 0);
   const expectedConfirmedAt = Number(user.auto_mine_confirmed_at || 0);
   const confirmIncrement = manualConfirm ? 1 : 0;
@@ -195,13 +196,15 @@ app.get('/api/bootstrap', async (c) => {
 app.post('/api/tap', async (c) => {
   const user = await currentUser(c);
   const body: { count?: number } = await c.req.json<{ count?: number }>().catch(() => ({ count: 1 }));
-  const requested = Math.min(MAX_TAPS_PER_REQUEST, Math.max(1, Math.floor(Number(body.count || 1))));
+  const ownerMode = isOwner(c.env, user);
+  const rawRequested = Math.max(1, Math.floor(Number(body.count || 1)));
+  const requested = ownerMode ? Math.min(rawRequested, 10_000) : Math.min(MAX_TAPS_PER_REQUEST, rawRequested);
   const now = Date.now();
   const energy = effectiveEnergy(user, now);
   const bucket = effectiveTapBucket(user, now);
   const energyPerTap = tapRewardPerTap(user, now);
-  const affordableTaps = Math.floor(energy / energyPerTap);
-  const awardedTaps = Math.max(0, Math.min(requested, Math.floor(bucket), affordableTaps));
+  const affordableTaps = ownerMode ? requested : Math.floor(energy / energyPerTap);
+  const awardedTaps = ownerMode ? requested : Math.max(0, Math.min(requested, Math.floor(bucket), affordableTaps));
 
   if (awardedTaps <= 0) {
     const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
@@ -220,7 +223,7 @@ app.post('/api/tap', async (c) => {
     });
   }
 
-  const nextBucket = Math.max(0, bucket - awardedTaps);
+  const nextBucket = ownerMode ? Number(user.tap_bucket || 0) : Math.max(0, bucket - awardedTaps);
   const event = blueHourState(now);
   const prestige = prestigeMultiplier(Number(user.prestige_level || 0));
   let comboCount = now - Number(user.combo_last_at || 0) <= COMBO_WINDOW_MS ? Number(user.combo_count || 0) : 0;
@@ -240,7 +243,8 @@ app.post('/api/tap', async (c) => {
     }
     awarded += normalReward * luckyMultiplier;
   }
-  const energySpent = awardedTaps * energyPerTap;
+  const energySpent = ownerMode ? 0 : awardedTaps * energyPerTap;
+  const nextEnergy = ownerMode ? Number(user.energy || 0) : energy - energySpent;
 
   const updated = await c.env.DB.prepare(`
     UPDATE users
@@ -251,7 +255,7 @@ app.post('/api/tap', async (c) => {
       AND taps = ? AND energy = ? AND last_energy_at = ? AND tap_bucket_at = ?
       AND combo_count = ? AND combo_last_at = ?
   `).bind(
-    awarded, awarded, awardedTaps, energy - energySpent, now,
+    awarded, awarded, awardedTaps, nextEnergy, now,
     nextBucket, now, comboCount, now, luckyHits,
     awardedTaps, awardedTaps, now,
     user.id, user.taps, user.energy, user.last_energy_at, user.tap_bucket_at,
@@ -284,10 +288,11 @@ app.post('/api/upgrades/auto-mine', async (c) => {
   const now = Date.now();
   const settled = await settleAutoMine(c.env, user, now);
   const current = settled.user;
+  const ownerMode = isOwner(c.env, current);
   const level = autoMineLevel(current);
-  const cost = autoMineUpgradeCost(level);
+  const cost = ownerMode ? 0 : autoMineUpgradeCost(level);
   if (cost === null) return c.json({ error: 'Maximum auto-mine level reached' }, 409);
-  if (current.points < cost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
+  if (!ownerMode && current.points < cost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
   const result = await c.env.DB.prepare(`
     UPDATE users SET points = points - ?, auto_mine_level = auto_mine_level + 1, auto_mine_last_at = ?, auto_mine_confirmed_at = ?, updated_at = ?
     WHERE id = ? AND points >= ? AND auto_mine_level = ?
@@ -303,10 +308,11 @@ app.post('/api/upgrades/auto-mine', async (c) => {
 
 app.post('/api/upgrades/tap-power', async (c) => {
   const user = await currentUser(c);
+  const ownerMode = isOwner(c.env, user);
   const level = tapPowerLevel(user);
-  const cost = tapPowerUpgradeCost(level);
+  const cost = ownerMode ? 0 : tapPowerUpgradeCost(level);
   if (cost === null) return c.json({ error: 'Maximum tap power reached' }, 409);
-  if (user.points < cost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
+  if (!ownerMode && user.points < cost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
   const now = Date.now();
   const result = await c.env.DB.prepare('UPDATE users SET points = points - ?, tap_power_level = tap_power_level + 1, updated_at = ? WHERE id = ? AND points >= ? AND tap_power_level = ?').bind(cost, now, user.id, cost, level).run();
   if (!result.meta.changes) return c.json({ error: 'ارتقا انجام نشد؛ دوباره تلاش کن' }, 409);
@@ -321,14 +327,17 @@ app.post('/api/upgrades/tap-power', async (c) => {
 app.post('/api/upgrades/turbo', async (c) => {
   const user = await currentUser(c);
   const now = Date.now();
-  if (isTurboActive(user, now)) return c.json({ error: 'توربو همین حالا فعال است' }, 409);
-  const cost = turboCost(user);
-  if (user.points < cost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
-  const turboUntil = now + TURBO_DURATION_SECONDS * 1000;
-  const result = await c.env.DB.prepare(`
-    UPDATE users SET points = points - ?, turbo_until = ?, daily_turbo_uses = daily_turbo_uses + 1, weekly_turbo_uses = weekly_turbo_uses + 1, updated_at = ?
-    WHERE id = ? AND points >= ? AND turbo_until <= ?
-  `).bind(cost, turboUntil, now, user.id, cost, now).run();
+  const ownerMode = isOwner(c.env, user);
+  if (!ownerMode && isTurboActive(user, now)) return c.json({ error: 'توربو همین حالا فعال است' }, 409);
+  const cost = ownerMode ? 0 : turboCost(user);
+  if (!ownerMode && user.points < cost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
+  const turboUntil = (ownerMode ? Math.max(now, Number(user.turbo_until || 0)) : now) + TURBO_DURATION_SECONDS * 1000;
+  const result = ownerMode
+    ? await c.env.DB.prepare('UPDATE users SET turbo_until = ?, daily_turbo_uses = daily_turbo_uses + 1, weekly_turbo_uses = weekly_turbo_uses + 1, updated_at = ? WHERE id = ?').bind(turboUntil, now, user.id).run()
+    : await c.env.DB.prepare(`
+      UPDATE users SET points = points - ?, turbo_until = ?, daily_turbo_uses = daily_turbo_uses + 1, weekly_turbo_uses = weekly_turbo_uses + 1, updated_at = ?
+      WHERE id = ? AND points >= ? AND turbo_until <= ?
+    `).bind(cost, turboUntil, now, user.id, cost, now).run();
   if (!result.meta.changes) return c.json({ error: 'فعال‌سازی توربو انجام نشد؛ دوباره تلاش کن' }, 409);
   await Promise.all([
     c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(user.id, -cost, 'turbo', JSON.stringify({ durationSeconds: TURBO_DURATION_SECONDS, turboUntil }), now).run(),
@@ -343,13 +352,15 @@ app.post('/api/boosters/auto-mine', async (c) => {
   const now = Date.now();
   const settled = await settleAutoMine(c.env, user, now);
   const current = settled.user;
-  if (current.points < AUTO_MINE_BOOST_COST) return c.json({ error: 'Blue Points کافی نیست' }, 409);
+  const ownerMode = isOwner(c.env, current);
+  const boostCost = ownerMode ? 0 : AUTO_MINE_BOOST_COST;
+  if (!ownerMode && current.points < boostCost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
   const boostUntil = Math.max(now, Number(current.auto_mine_boost_until || 0)) + AUTO_MINE_BOOST_DURATION_MS;
-  const result = await c.env.DB.prepare('UPDATE users SET points = points - ?, auto_mine_boost_until = ?, auto_mine_last_at = ?, auto_mine_confirmed_at = ?, updated_at = ? WHERE id = ? AND points >= ?').bind(AUTO_MINE_BOOST_COST, boostUntil, now, now, now, current.id, AUTO_MINE_BOOST_COST).run();
+  const result = await c.env.DB.prepare('UPDATE users SET points = points - ?, auto_mine_boost_until = ?, auto_mine_last_at = ?, auto_mine_confirmed_at = ?, updated_at = ? WHERE id = ? AND points >= ?').bind(boostCost, boostUntil, now, now, now, current.id, boostCost).run();
   if (!result.meta.changes) return c.json({ error: 'فعال‌سازی Booster انجام نشد' }, 409);
   await Promise.all([
-    c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(current.id, -AUTO_MINE_BOOST_COST, 'auto_mine_booster', JSON.stringify({ boostUntil }), now).run(),
-    contributeJackpot(c.env, AUTO_MINE_BOOST_COST),
+    c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(current.id, -boostCost, 'auto_mine_booster', JSON.stringify({ boostUntil, ownerMode }), now).run(),
+    contributeJackpot(c.env, boostCost),
   ]);
   const fresh = (await getUserByTelegramId(c.env, current.telegram_id))!;
   return c.json({ profile: await profileView(c.env, fresh), settledAwarded: settled.awarded });
@@ -357,14 +368,18 @@ app.post('/api/boosters/auto-mine', async (c) => {
 
 app.post('/api/shop/mining-shield', async (c) => {
   const user = await currentUser(c);
-  if (Number(user.mining_shields || 0) >= MAX_MINING_SHIELDS) return c.json({ error: 'حداکثر Mining Shield را داری' }, 409);
-  if (user.points < MINING_SHIELD_COST) return c.json({ error: 'Blue Points کافی نیست' }, 409);
+  const ownerMode = isOwner(c.env, user);
+  if (!ownerMode && Number(user.mining_shields || 0) >= MAX_MINING_SHIELDS) return c.json({ error: 'حداکثر Mining Shield را داری' }, 409);
+  const shieldCost = ownerMode ? 0 : MINING_SHIELD_COST;
+  if (!ownerMode && user.points < shieldCost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
   const now = Date.now();
-  const result = await c.env.DB.prepare('UPDATE users SET points = points - ?, mining_shields = mining_shields + 1, updated_at = ? WHERE id = ? AND points >= ? AND mining_shields < ?').bind(MINING_SHIELD_COST, now, user.id, MINING_SHIELD_COST, MAX_MINING_SHIELDS).run();
+  const result = ownerMode
+    ? await c.env.DB.prepare('UPDATE users SET mining_shields = mining_shields + 1, updated_at = ? WHERE id = ?').bind(now, user.id).run()
+    : await c.env.DB.prepare('UPDATE users SET points = points - ?, mining_shields = mining_shields + 1, updated_at = ? WHERE id = ? AND points >= ? AND mining_shields < ?').bind(shieldCost, now, user.id, shieldCost, MAX_MINING_SHIELDS).run();
   if (!result.meta.changes) return c.json({ error: 'خرید Shield انجام نشد' }, 409);
   await Promise.all([
-    c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(user.id, -MINING_SHIELD_COST, 'mining_shield', JSON.stringify({ quantity: 1 }), now).run(),
-    contributeJackpot(c.env, MINING_SHIELD_COST),
+    c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(user.id, -shieldCost, 'mining_shield', JSON.stringify({ quantity: 1, ownerMode }), now).run(),
+    contributeJackpot(c.env, shieldCost),
   ]);
   const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
   return c.json({ profile: await profileView(c.env, fresh) });
@@ -377,7 +392,8 @@ app.post('/api/prestige', async (c) => {
   const current = settled.user;
   const prestigeLevel = Number(current.prestige_level || 0);
   const requirement = PRESTIGE_STEP * (prestigeLevel + 1);
-  if (Number(current.total_earned || 0) < requirement) return c.json({ error: 'برای Prestige هنوز کل استخراج کافی نیست' }, 409);
+  const ownerMode = isOwner(c.env, current);
+  if (!ownerMode && Number(current.total_earned || 0) < requirement) return c.json({ error: 'برای Prestige هنوز کل استخراج کافی نیست' }, 409);
   const spentPoints = Number(current.points || 0);
   await c.env.DB.batch([
     c.env.DB.prepare(`
@@ -398,12 +414,13 @@ app.post('/api/chest/claim', async (c) => {
   const settled = await settleAutoMine(c.env, user, now);
   let current = settled.user;
   const expectedLastChestAt = Number(current.last_chest_at || 0);
-  const state = chestState(expectedLastChestAt, now);
+  const ownerMode = isOwner(c.env, current);
+  const state = ownerMode ? { ready: true } : chestState(expectedLastChestAt, now);
   if (!state.ready) return c.json({ error: 'صندوق هنوز آماده نیست' }, 409);
 
   const maxEnergy = energyProgression(current).maxEnergy;
   let reward = rollChestReward(maxEnergy);
-  if (reward.type === 'shield' && Number(current.mining_shields || 0) >= MAX_MINING_SHIELDS) {
+  if (!ownerMode && reward.type === 'shield' && Number(current.mining_shields || 0) >= MAX_MINING_SHIELDS) {
     reward = { type: 'points', amount: 1_000, label: '+1,000 BP (Shield کامل بود)' };
   }
 
@@ -420,10 +437,15 @@ app.post('/api/chest/claim', async (c) => {
       WHERE id = ? AND last_chest_at = ? AND energy = ? AND last_energy_at = ?
     `).bind(nextEnergy, now, now, now, current.id, expectedLastChestAt, current.energy, current.last_energy_at).run();
   } else if (reward.type === 'shield') {
-    updated = await c.env.DB.prepare(`
-      UPDATE users SET mining_shields = mining_shields + 1, last_chest_at = ?, updated_at = ?
-      WHERE id = ? AND last_chest_at = ? AND mining_shields = ? AND mining_shields < ?
-    `).bind(now, now, current.id, expectedLastChestAt, current.mining_shields, MAX_MINING_SHIELDS).run();
+    updated = ownerMode
+      ? await c.env.DB.prepare(`
+        UPDATE users SET mining_shields = mining_shields + 1, last_chest_at = ?, updated_at = ?
+        WHERE id = ? AND last_chest_at = ? AND mining_shields = ?
+      `).bind(now, now, current.id, expectedLastChestAt, current.mining_shields).run()
+      : await c.env.DB.prepare(`
+        UPDATE users SET mining_shields = mining_shields + 1, last_chest_at = ?, updated_at = ?
+        WHERE id = ? AND last_chest_at = ? AND mining_shields = ? AND mining_shields < ?
+      `).bind(now, now, current.id, expectedLastChestAt, current.mining_shields, MAX_MINING_SHIELDS).run();
   } else if (reward.type === 'auto_boost') {
     const boostUntil = Math.max(now, Number(current.auto_mine_boost_until || 0)) + reward.durationMs;
     updated = await c.env.DB.prepare(`
@@ -456,8 +478,9 @@ app.post('/api/skins/:skinId', async (c) => {
   const skinId = c.req.param('skinId');
   const skin = SKINS.find((item) => item.id === skinId);
   if (!skin) return c.json({ error: 'Skin not found' }, 404);
-  let unlocked: string[] = ['blue'];
-  try { unlocked = Array.from(new Set(['blue', ...JSON.parse(user.unlocked_skins || '[]').map(String)])); } catch {}
+  const ownerMode = isOwner(c.env, user);
+  let unlocked: string[] = ownerMode ? SKINS.map((item) => item.id) : ['blue'];
+  if (!ownerMode) { try { unlocked = Array.from(new Set(['blue', ...JSON.parse(user.unlocked_skins || '[]').map(String)])); } catch {} }
   const now = Date.now();
   if (!unlocked.includes(skin.id)) {
     if (user.points < skin.cost) return c.json({ error: 'Blue Points کافی نیست' }, 409);
@@ -476,15 +499,18 @@ app.post('/api/skins/:skinId', async (c) => {
 app.post('/api/daily', async (c) => {
   const user = await currentUser(c);
   const day = utcDayKey();
-  if (user.last_daily_day === day) return c.json({ error: 'Daily reward already claimed' }, 409);
-  const streak = isYesterday(user.last_daily_day, day) ? Number(user.daily_streak || 0) + 1 : 1;
+  const ownerMode = isOwner(c.env, user);
+  if (!ownerMode && user.last_daily_day === day) return c.json({ error: 'Daily reward already claimed' }, 409);
+  const streak = ownerMode ? Number(user.daily_streak || 0) + 1 : isYesterday(user.last_daily_day, day) ? Number(user.daily_streak || 0) + 1 : 1;
   const { day: streakDay, reward } = dailyRewardForStreak(streak);
   const now = Date.now();
-  const updated = await c.env.DB.prepare(`
-    UPDATE users
-    SET points = points + ?, total_earned = total_earned + ?, last_daily_day = ?, daily_streak = ?, updated_at = ?
-    WHERE id = ? AND COALESCE(last_daily_day, '') <> ?
-  `).bind(reward, reward, day, streak, now, user.id, day).run();
+  const updated = ownerMode
+    ? await c.env.DB.prepare('UPDATE users SET points = points + ?, total_earned = total_earned + ?, last_daily_day = ?, daily_streak = ?, updated_at = ? WHERE id = ?').bind(reward, reward, day, streak, now, user.id).run()
+    : await c.env.DB.prepare(`
+      UPDATE users
+      SET points = points + ?, total_earned = total_earned + ?, last_daily_day = ?, daily_streak = ?, updated_at = ?
+      WHERE id = ? AND COALESCE(last_daily_day, '') <> ?
+    `).bind(reward, reward, day, streak, now, user.id, day).run();
   if (!updated.meta.changes) return c.json({ error: 'Daily reward already claimed' }, 409);
   await appendLedger(c.env, user.id, reward, 'daily', { streak, streakDay }, now);
   const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
@@ -522,16 +548,19 @@ app.post('/api/tasks/:taskId/claim', async (c) => {
   const taskId = c.req.param('taskId');
   const task = TASKS.find((item) => item.id === taskId);
   if (!task) return c.json({ error: 'Task not found' }, 404);
+  const ownerMode = isOwner(c.env, user);
   const tasks = await taskView(c.env, user);
   const state = tasks.find((item) => item.id === taskId)!;
-  if (state.claimed) return c.json({ error: 'Task already claimed' }, 409);
-  if (!state.completed) return c.json({ error: 'Task is not completed yet' }, 400);
+  if (!ownerMode && state.claimed) return c.json({ error: 'Task already claimed' }, 409);
+  if (!ownerMode && !state.completed) return c.json({ error: 'Task is not completed yet' }, 400);
   const now = Date.now();
-  const inserted = await c.env.DB.prepare('INSERT OR IGNORE INTO task_claims (user_id, task_id, reward, created_at) VALUES (?, ?, ?, ?)').bind(user.id, task.id, task.reward, now).run();
-  if (!inserted.meta.changes) return c.json({ error: 'Task already claimed' }, 409);
+  if (!ownerMode) {
+    const inserted = await c.env.DB.prepare('INSERT OR IGNORE INTO task_claims (user_id, task_id, reward, created_at) VALUES (?, ?, ?, ?)').bind(user.id, task.id, task.reward, now).run();
+    if (!inserted.meta.changes) return c.json({ error: 'Task already claimed' }, 409);
+  }
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE users SET points = points + ?, total_earned = total_earned + ?, updated_at = ? WHERE id = ?').bind(task.reward, task.reward, now, user.id),
-    c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(user.id, task.reward, 'task', JSON.stringify({ taskId }), now),
+    c.env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(user.id, task.reward, ownerMode ? 'owner_task' : 'task', JSON.stringify({ taskId }), now),
   ]);
   const fresh = (await getUserByTelegramId(c.env, user.telegram_id))!;
   return c.json({ reward: task.reward, profile: await profileView(c.env, fresh), tasks: await taskView(c.env, fresh) });

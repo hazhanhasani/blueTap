@@ -7,6 +7,7 @@ export interface Env {
   AUTH_MAX_AGE_SECONDS?: string;
   BLUEX_JETTON_MASTER: string;
   BOT_USERNAME?: string;
+  OWNER_TELEGRAM_ID?: string;
 }
 
 export interface TelegramAuth {

@@ -1,4 +1,5 @@
 export interface Profile {
+  ownerMode: boolean;
   id: string;
   firstName: string;
   username: string | null;

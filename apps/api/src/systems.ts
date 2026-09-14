@@ -9,6 +9,7 @@ import {
   utcWeekKey,
   weekStartMs,
 } from './features';
+import { isOwner } from './owner';
 import type { Env, UserRow } from './types';
 
 function publicPlayerId(id: number) {
@@ -51,6 +52,7 @@ function metricProgress(user: UserRow, metric: string) {
 
 export async function challengeView(env: Env, user: UserRow, now = Date.now()) {
   const normalized = await normalizeActivityCounters(env, user, now);
+  const ownerMode = isOwner(env, normalized);
   const day = utcDayKey(now);
   const week = utcWeekKey(now);
   const claims = await env.DB.prepare(`
@@ -62,6 +64,7 @@ export async function challengeView(env: Env, user: UserRow, now = Date.now()) {
   return CHALLENGES.map((challenge) => {
     const progress = metricProgress(normalized, challenge.metric);
     const periodKey = challenge.period === 'daily' ? day : week;
+    if (ownerMode) return { ...challenge, periodKey, progress: challenge.target, completed: true, claimed: false };
     return {
       ...challenge,
       periodKey,
@@ -76,8 +79,17 @@ export async function claimChallenge(env: Env, user: UserRow, challengeId: strin
   const challenge = CHALLENGES.find((item) => item.id === challengeId);
   if (!challenge) return { error: 'Challenge not found', status: 404 as const };
   const normalized = await normalizeActivityCounters(env, user, now);
+  const ownerMode = isOwner(env, normalized);
   const progress = metricProgress(normalized, challenge.metric);
-  if (progress < challenge.target) return { error: 'Challenge is not completed yet', status: 400 as const };
+  if (!ownerMode && progress < challenge.target) return { error: 'Challenge is not completed yet', status: 400 as const };
+  if (ownerMode) {
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET points = points + ?, total_earned = total_earned + ?, updated_at = ? WHERE id = ?').bind(challenge.reward, challenge.reward, now, normalized.id),
+      env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(normalized.id, challenge.reward, 'owner_challenge', JSON.stringify({ challengeId }), now),
+    ]);
+    const fresh = (await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(normalized.id).first<UserRow>())!;
+    return { reward: challenge.reward, user: fresh };
+  }
   const periodKey = challenge.period === 'daily' ? utcDayKey(now) : utcWeekKey(now);
   const inserted = await env.DB.prepare(`
     INSERT OR IGNORE INTO challenge_claims (user_id, challenge_id, period_key, reward, created_at)
@@ -112,6 +124,7 @@ export async function leagueView(env: Env, user: UserRow, now = Date.now()) {
   const previous = leagueForPoints(previousPoints);
   const claimed = await env.DB.prepare('SELECT 1 AS ok FROM league_reward_claims WHERE user_id = ? AND week_key = ?')
     .bind(user.id, previousRange.key).first<{ ok: number }>();
+  const ownerMode = isOwner(env, user);
   return {
     current: { id: current.id, name: current.name, points: currentPoints, nextMin: current.nextMin, nextName: current.nextName },
     previous: {
@@ -119,15 +132,24 @@ export async function leagueView(env: Env, user: UserRow, now = Date.now()) {
       id: previous.id,
       name: previous.name,
       points: previousPoints,
-      reward: previousPoints > 0 ? previous.reward : 0,
-      claimable: previousPoints > 0 && !claimed,
-      claimed: Boolean(claimed),
+      reward: ownerMode ? previous.reward : previousPoints > 0 ? previous.reward : 0,
+      claimable: ownerMode || (previousPoints > 0 && !claimed),
+      claimed: ownerMode ? false : Boolean(claimed),
     },
   };
 }
 
 export async function claimPreviousLeagueReward(env: Env, user: UserRow, now = Date.now()) {
   const state = await leagueView(env, user, now);
+  if (isOwner(env, user)) {
+    const reward = Math.max(1, state.previous.reward);
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET points = points + ?, total_earned = total_earned + ?, updated_at = ? WHERE id = ?').bind(reward, reward, now, user.id),
+      env.DB.prepare('INSERT INTO point_ledger (user_id, amount, kind, metadata, created_at) VALUES (?, ?, ?, ?, ?)').bind(user.id, reward, 'owner_league_reward', JSON.stringify({ weekKey: state.previous.weekKey, league: state.previous.id }), now),
+    ]);
+    const fresh = (await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first<UserRow>())!;
+    return { reward, user: fresh };
+  }
   if (!state.previous.claimable || state.previous.reward <= 0) {
     return { error: state.previous.claimed ? 'League reward already claimed' : 'No league reward is available', status: 409 as const };
   }
