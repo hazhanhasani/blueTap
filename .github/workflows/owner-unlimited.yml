@@ -29,6 +29,9 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Repair owner patch matcher
+        run: python3 scripts/repair_owner_patch.py
+
       - name: Apply owner unrestricted mode
         run: python3 scripts/owner_unlimited.py
 
@@ -81,9 +84,9 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          rm -f scripts/owner_unlimited.py
+          rm -f scripts/owner_unlimited.py scripts/repair_owner_patch.py
           git add apps/api apps/web tests
-          git add -u scripts/owner_unlimited.py
+          git add -u scripts/owner_unlimited.py scripts/repair_owner_patch.py
           git diff --cached --check
           git commit -m 'Enable unrestricted owner account mode'
           git push origin HEAD:main
