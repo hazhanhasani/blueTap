@@ -1,0 +1,89 @@
+name: BlueTap Owner Unlimited
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/owner-unlimited.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bluetap-owner-unlimited
+  cancel-in-progress: false
+
+jobs:
+  patch-test-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Apply owner unrestricted mode
+        run: python3 scripts/owner_unlimited.py
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Security and owner regression tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply bluetap --remote --config apps/api/wrangler.toml
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy production Worker
+        run: npx wrangler deploy --config apps/api/wrangler.toml
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Production smoke test
+        shell: bash
+        env:
+          APP_URL: https://bluetap.hazhanhasani4268-0f9.workers.dev
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 4 --retry-delay 2 "$APP_URL/health" > /tmp/health.json
+          curl --fail --silent --show-error --retry 4 --retry-delay 2 "$APP_URL/tonconnect-manifest.json?deploy=$GITHUB_SHA" > /tmp/manifest.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const health = JSON.parse(fs.readFileSync('/tmp/health.json', 'utf8'));
+          const manifest = JSON.parse(fs.readFileSync('/tmp/manifest.json', 'utf8'));
+          if (!health.ok) throw new Error('Production health endpoint is not OK');
+          if (!health.telegramBotConfigured) throw new Error('TELEGRAM_BOT_TOKEN is not configured');
+          if (!health.telegramWebhookSecretConfigured) throw new Error('TELEGRAM_WEBHOOK_SECRET is not configured');
+          if (manifest.url !== process.env.APP_URL) throw new Error(`TON Connect manifest URL mismatch: ${manifest.url}`);
+          console.log('Production smoke test passed');
+          NODE
+
+      - name: Commit owner mode source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f scripts/owner_unlimited.py
+          git add apps/api apps/web tests
+          git add -u scripts/owner_unlimited.py
+          git diff --cached --check
+          git commit -m 'Enable unrestricted owner account mode'
+          git push origin HEAD:main
